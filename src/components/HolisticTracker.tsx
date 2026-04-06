@@ -173,9 +173,9 @@ export const HolisticTracker: React.FC = () => {
           const rightHandGesture = logic.detectHandGesture(results.rightHandLandmarks);
           const gesture = leftHandGesture || rightHandGesture;
 
-          if (gesture === 'FIVE') zoomVelocity = 0.05;
-          else if (gesture === 'THUMBS_DOWN') zoomVelocity = -0.05;
-          else if (gesture === 'FIST') zoomVelocity = 0;
+          if (gesture === 'FIVE') zoomVelocity = 0.02; // Slower, smoother zoom
+          else if (gesture === 'THUMBS_DOWN') zoomVelocity = -0.02;
+          else zoomVelocity = 0; // Default to stop if no command gesture is visible
 
           if (zoomVelocity !== 0) {
             const nextZoom = Math.max(1, Math.min(5, zoomRef.current + zoomVelocity));
