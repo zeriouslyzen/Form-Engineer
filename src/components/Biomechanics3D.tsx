@@ -211,8 +211,14 @@ const VectorLine: React.FC<{ start: THREE.Vector3, end: THREE.Vector3, color: st
 };
 
 const SpiritCone: React.FC<{ start: THREE.Vector3, normal: THREE.Vector3, scale: number }> = ({ start, normal, scale }) => {
+  const meshRef = useRef<THREE.Mesh>(null);
+  useFrame(() => {
+    if (meshRef.current) {
+      meshRef.current.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
+    }
+  });
   return (
-    <mesh position={start} rotation={[Math.PI / 2, 0, 0]}>
+    <mesh ref={meshRef} position={start}>
       <coneGeometry args={[scale * 0.4, scale, 32, 1, true]} />
       <meshStandardMaterial color="#fbbf24" emissive="#fbbf24" emissiveIntensity={2} transparent opacity={0.05} wireframe />
     </mesh>
