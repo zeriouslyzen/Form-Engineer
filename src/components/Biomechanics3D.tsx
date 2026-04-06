@@ -297,6 +297,9 @@ const Dantien: React.FC<{ pose: any[] | null, getPos: (l: any) => THREE.Vector3,
 };
 
 export const Biomechanics3D: React.FC<Biomechanics3DProps> = (props) => {
+  const aspectW = props.videoSize?.width ? props.videoSize.width / 1000 : 1;
+  const aspectH = props.videoSize?.height ? props.videoSize.height / 1000 : 1;
+
   return (
     <div className="biomechanics-3d-overlay" style={{ 
       width: `${props.videoViewport.width}px`, 
@@ -307,10 +310,10 @@ export const Biomechanics3D: React.FC<Biomechanics3DProps> = (props) => {
       <Canvas gl={{ alpha: true, antialias: true }} dpr={[1, 2]} style={{ width: '100%', height: '100%' }}>
         <OrthographicCamera 
           makeDefault 
-          left={-0.5} 
-          right={0.5} 
-          top={0.5} 
-          bottom={-0.5} 
+          left={-aspectW / 2} 
+          right={aspectW / 2} 
+          top={aspectH / 2} 
+          bottom={-aspectH / 2} 
           near={0.1} 
           far={100} 
           position={[0, 0, 10]} 
