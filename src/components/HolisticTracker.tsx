@@ -78,16 +78,19 @@ export const HolisticTracker: React.FC = () => {
       const pAspect = pW / pH;
 
       let rW, rH, rT, rL;
-      if (pAspect > vAspect) { // Pillarbox
-        rH = pH;
-        rW = rH * vAspect;
-        rT = 0;
-        rL = (pW - rW) / 2;
-      } else { // Letterbox
+      // TIKTOK/FACETIME MODE: object-fit: cover math
+      if (pAspect > vAspect) { 
+        // Screen is wider relative to video. Constrain width, let height overflow.
         rW = pW;
         rH = rW / vAspect;
         rT = (pH - rH) / 2;
         rL = 0;
+      } else { 
+        // Screen is taller relative to video. Constrain height, let width overflow.
+        rH = pH;
+        rW = rH * vAspect;
+        rT = 0;
+        rL = (pW - rW) / 2;
       }
       
       setVideoViewport(prev => {
@@ -99,8 +102,16 @@ export const HolisticTracker: React.FC = () => {
     };
 
     updateViewport();
+    // Add a re-run for mobile devices where clientWidth might be zero temporarily
+    const t = setTimeout(updateViewport, 100);
+    const t2 = setTimeout(updateViewport, 1000);
+
     window.addEventListener('resize', updateViewport);
-    return () => window.removeEventListener('resize', updateViewport);
+    return () => {
+      clearTimeout(t);
+      clearTimeout(t2);
+      window.removeEventListener('resize', updateViewport);
+    };
   }, [allLandmarks.imageSize.width, allLandmarks.imageSize.height]);
 
   const applyHardwareZoom = async (value: number) => {
@@ -282,8 +293,19 @@ export const HolisticTracker: React.FC = () => {
     const zoomVal = zoomRef.current;
     const panVal = panRef.current;
 
-    const sw = w / zoomVal;
-    const sh = h / zoomVal;
+    const canvAspect = canvas.width / canvas.height;
+    const imgAspect = w / h;
+
+    let sw, sh;
+    if (canvAspect > imgAspect) {
+        // Source is taller than target relatively (Portrait camera?)
+        sw = w / zoomVal;
+        sh = sw / canvAspect;
+    } else {
+        // Source is wider than target (Standard FaceTime mode on 16:9 camera)
+        sh = h / zoomVal;
+        sw = sh * canvAspect;
+    }
 
     const cx = w / 2 + (panVal.x * (w / 1000));
     const cy = h / 2 + (panVal.y * (h / 2000));
