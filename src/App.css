@@ -36,6 +36,26 @@ body {
   border-radius: 0;
 }
 
+@media (max-width: 768px) {
+  .iphone-pillar:first-of-type {
+    display: none;
+  }
+  .iphone-pillar {
+    width: 100vw !important;
+  }
+  .zoom-knob-container {
+    right: 16px;
+    padding: 15px 8px;
+  }
+  .zoom-knob-input {
+    height: 200px;
+  }
+  .ai-pulse {
+    top: 16px;
+    right: 16px;
+  }
+}
+
 canvas {
   width: 100%;
   height: 100%;
