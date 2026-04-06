@@ -45,7 +45,7 @@ export const HolisticTracker: React.FC = () => {
   // Focus & Pan States
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1.0);
-  const [skeletonScale, setSkeletonScale] = useState(1.0); 
+  const [skeletonScale] = useState(1.0); 
 
   const gesturesEnabledRef = useRef(true); 
   const zoomRef = useRef(1.0);

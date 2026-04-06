@@ -50,7 +50,7 @@ const HAND_CONNECTIONS = [
   [0, 17], [17, 18], [18, 19], [19, 20], // Pinky
 ];
 
-const Skeleton: React.FC<Biomechanics3DProps> = ({ pose, face, leftHand, rightHand, mirror = true, skeletonScale, videoSize, cropInfo, videoViewport }) => {
+const Skeleton: React.FC<Biomechanics3DProps> = ({ pose, face, leftHand, rightHand, mirror = true, skeletonScale, videoSize, cropInfo }) => {
   const getPos = (l: any) => {
     if (!l) return new THREE.Vector3(0, 0, 0);
     const w = videoSize.width;
