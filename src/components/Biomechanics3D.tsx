@@ -66,7 +66,8 @@ const Skeleton: React.FC<Biomechanics3DProps> = ({ pose, face, leftHand, rightHa
     const relY = (l.y * h - sy) / sh;
     const xBase = mirror ? (0.5 - relX) : (relX - 0.5);
     const yBase = 1.0 - (relY * 2.0);
-    return new THREE.Vector3(xBase * skeletonScale, yBase * skeletonScale, -l.z * skeletonScale);
+    // STICK PRECISELY: No multiplier on position. 
+    return new THREE.Vector3(xBase, yBase, -l.z);
   };
 
   // 1. Calculate Core Alignments for whole-skeleton coloring
@@ -96,7 +97,7 @@ const Skeleton: React.FC<Biomechanics3DProps> = ({ pose, face, leftHand, rightHa
           {pose.map((l, i) => (
             l.visibility > 0.5 && (
               <mesh key={`p-${i}`} position={getPos(l)}>
-                <sphereGeometry args={[0.012, 16, 16]} />
+                <sphereGeometry args={[0.012 * skeletonScale, 16, 16]} />
                 <meshStandardMaterial color="#10b981" emissive="#10b981" emissiveIntensity={2} />
               </mesh>
             )
@@ -128,7 +129,7 @@ const Skeleton: React.FC<Biomechanics3DProps> = ({ pose, face, leftHand, rightHa
         <group key={`h-${hIdx}`}>
           {hand.map((l, i) => (
             <mesh key={`h-${hIdx}-${i}`} position={getPos(l)}>
-              <sphereGeometry args={[0.005, 8, 8]} />
+              <sphereGeometry args={[0.005 * skeletonScale, 8, 8]} />
               <meshStandardMaterial color="#00ffff" emissive="#00ffff" emissiveIntensity={3} />
             </mesh>
           ))}
@@ -138,7 +139,7 @@ const Skeleton: React.FC<Biomechanics3DProps> = ({ pose, face, leftHand, rightHa
           <SpiritCone 
              start={getPos(hand[9])} 
              normal={new THREE.Vector3().subVectors(getPos(hand[12]), getPos(hand[0])).normalize()} 
-             scale={0.12} 
+             scale={0.12 * skeletonScale} 
           />
         </group>
       ))}
@@ -160,13 +161,13 @@ const Skeleton: React.FC<Biomechanics3DProps> = ({ pose, face, leftHand, rightHa
         </group>
       )}
 
-      <Dantien pose={pose} getPos={getPos} />
-      <ChakraSystem pose={pose} getPos={getPos} />
+      <Dantien pose={pose} getPos={getPos} skeletonScale={skeletonScale} />
+      <ChakraSystem pose={pose} getPos={getPos} skeletonScale={skeletonScale} />
     </group>
   );
 };
 
-const ChakraSystem: React.FC<{ pose: any[] | null, getPos: (l: any) => THREE.Vector3 }> = ({ pose, getPos }) => {
+const ChakraSystem: React.FC<{ pose: any[] | null, getPos: (l: any) => THREE.Vector3, skeletonScale: number }> = ({ pose, getPos, skeletonScale }) => {
   if (!pose || !pose[0] || !pose[23] || !pose[24]) return null;
   const nose = getPos(pose[0]);
   const hipCenter = new THREE.Vector3().lerpVectors(getPos(pose[23]), getPos(pose[24]), 0.5);
@@ -189,7 +190,7 @@ const ChakraSystem: React.FC<{ pose: any[] | null, getPos: (l: any) => THREE.Vec
         return (
           <group key={`ch-${i}`}>
             <mesh position={p}>
-              <sphereGeometry args={[0.015, 16, 16]} />
+              <sphereGeometry args={[0.015 * skeletonScale, 16, 16]} />
               <meshStandardMaterial color={spineColor === '#22c55e' ? '#22c55e' : c.color} emissive={spineColor === '#22c55e' ? '#22c55e' : c.color} emissiveIntensity={spineIntensity} />
             </mesh>
             <VectorLine start={p.clone().add(new THREE.Vector3(0,0,0.08))} end={p.clone().add(new THREE.Vector3(0,0,-0.08))} color={spineColor} opacity={0.6} />
@@ -226,7 +227,7 @@ const SpiritCone: React.FC<{ start: THREE.Vector3, normal: THREE.Vector3, scale:
   );
 };
 
-const Dantien: React.FC<{ pose: any[] | null, getPos: (l: any) => THREE.Vector3 }> = ({ pose, getPos }) => {
+const Dantien: React.FC<{ pose: any[] | null, getPos: (l: any) => THREE.Vector3, skeletonScale: number }> = ({ pose, getPos, skeletonScale }) => {
   const meshRef = useRef<THREE.Mesh>(null);
   useFrame(({ clock }) => {
     if (!meshRef.current || !pose || !pose[23] || !pose[24]) return;
@@ -236,7 +237,7 @@ const Dantien: React.FC<{ pose: any[] | null, getPos: (l: any) => THREE.Vector3 
   });
   return (
     <mesh ref={meshRef}>
-      <sphereGeometry args={[0.05, 32, 32]} />
+      <sphereGeometry args={[0.05 * skeletonScale, 32, 32]} />
       <meshStandardMaterial color="#fbbf24" emissive="#fbbf24" emissiveIntensity={5} transparent opacity={0.2} />
     </mesh>
   );

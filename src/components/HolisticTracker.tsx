@@ -177,6 +177,10 @@ export const HolisticTracker: React.FC = () => {
           else if (gesture === 'THUMBS_DOWN') zoomVelocity = -0.02;
           else zoomVelocity = 0; // Default to stop if no command gesture is visible
 
+          // Independent Skeleton Scale Gestures
+          if (gesture === 'ONE') setSkeletonScale(prev => Math.min(3, prev + 0.02));
+          else if (gesture === 'TWO') setSkeletonScale(prev => Math.max(0.2, prev - 0.02));
+
           if (zoomVelocity !== 0) {
             const nextZoom = Math.max(1, Math.min(5, zoomRef.current + zoomVelocity));
             if (nextZoom !== zoomRef.current) {

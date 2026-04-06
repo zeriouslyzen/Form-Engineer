@@ -95,9 +95,9 @@ export class JKDLogic {
 
   /**
    * Recognizes hand gestures for camera control.
-   * Returns: 'FIVE' (Zoom In), 'FIST' (Stop), 'THUMBS_DOWN' (Zoom Out), or null.
+   * Returns: Gestures for Zoom and Skeleton Scale.
    */
-  public detectHandGesture(handLandmarks: any[]): 'FIVE' | 'FIST' | 'THUMBS_DOWN' | null {
+  public detectHandGesture(handLandmarks: any[]): 'FIVE' | 'FIST' | 'THUMBS_DOWN' | 'ONE' | 'TWO' | null {
     if (!handLandmarks || handLandmarks.length < 21) return null;
 
     // Helper: Is finger extended?
@@ -115,7 +115,7 @@ export class JKDLogic {
     };
 
     const fingersExtended = [
-      isExtended(8, 6),  // Index
+      isExtended(8, 6),   // Index
       isExtended(12, 10), // Middle
       isExtended(16, 14), // Ring
       isExtended(20, 18)  // Pinky
@@ -123,18 +123,23 @@ export class JKDLogic {
 
     const extendedCount = fingersExtended.filter(v => v).length;
 
-    // 1. FIVE (Open Palm): Most fingers extended
+    // 1. FIVE (Open Palm): All/Most extended
     if (extendedCount >= 3) return 'FIVE';
 
-    // 2. THUMBS DOWN: 
-    // Hand is mostly closed (low extended count) AND thumb tip is below thumb base (higher Y)
+    // 2. ONE: Only Index
+    if (fingersExtended[0] && extendedCount === 1) return 'ONE';
+
+    // 3. TWO: Index and Middle
+    if (fingersExtended[0] && fingersExtended[1] && extendedCount === 2) return 'TWO';
+
+    // 4. THUMBS DOWN: 
     const thumbTip = handLandmarks[4];
     const thumbBase = handLandmarks[2];
-    const isThumbDown = thumbTip.y > thumbBase.y + 0.05; // Significant Y difference
+    const isThumbDown = thumbTip.y > thumbBase.y + 0.05; 
 
     if (extendedCount <= 1 && isThumbDown) return 'THUMBS_DOWN';
 
-    // 3. FIST: All fingers closed
+    // 5. FIST: All closed
     if (extendedCount === 0) return 'FIST';
 
     return null;
