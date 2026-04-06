@@ -10,10 +10,18 @@ export interface Landmark {
   visibility: number;
 }
 
+export interface BodyProfile {
+  shoulderWidth: number;
+  torsoHeight: number;
+  armLength: number;
+  lastUpdated: number;
+}
+
 export interface JKDSessionStats {
   punches: number;
   averageDirectness: number;
   telegraphCount: number;
+  bodyProfile: BodyProfile | null;
 }
 
 export class JKDLogic {
@@ -27,6 +35,9 @@ export class JKDLogic {
   private punchStartTime = 0;
   private maxWristExtension = 0;
   private telegraphDetected = false;
+  
+  private bodyProfile: BodyProfile | null = null;
+  private calibrationFrames: any[][] = [];
 
   /**
    * Analyzes a frame of landmarks for JKD Lead Punch mechanics.
@@ -90,6 +101,32 @@ export class JKDLogic {
     this.prevWristPos = { ...wrist };
     this.prevShoulderPos = { ...shoulder };
 
-    return result;
+    return { ...result, bodyProfile: this.bodyProfile };
+  }
+
+  /**
+   * Calibrates the body profile based on a 5-second sample.
+   */
+  public registerBody(landmarks: any[]) {
+    if (!landmarks || landmarks.length < 33) return;
+    this.calibrationFrames.push(landmarks);
+
+    // After ~150 frames (5s at 30fps), calculate averages
+    if (this.calibrationFrames.length >= 100) {
+      const avgShoulderWidth = this.calibrationFrames.reduce((acc, f) => acc + Math.abs(f[11].x - f[12].x), 0) / this.calibrationFrames.length;
+      const avgTorsoHeight = this.calibrationFrames.reduce((acc, f) => acc + Math.abs(f[12].y - f[24].y), 0) / this.calibrationFrames.length;
+      const avgArmLength = this.calibrationFrames.reduce((acc, f) => acc + Math.abs(f[14].x - f[12].x) + Math.abs(f[16].x - f[14].x), 0) / this.calibrationFrames.length;
+
+      this.bodyProfile = {
+        shoulderWidth: avgShoulderWidth,
+        torsoHeight: avgTorsoHeight,
+        armLength: avgArmLength,
+        lastUpdated: Date.now()
+      };
+      
+      this.calibrationFrames = []; // Clear for next time if needed
+      return true; // Calibration complete
+    }
+    return false;
   }
 }

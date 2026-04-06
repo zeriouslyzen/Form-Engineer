@@ -3,6 +3,7 @@ import { JKDLogic } from '../lib/JKDLogic';
 import { AudioCoach } from '../lib/AudioService';
 import { VoiceAI } from '../lib/VoiceAI';
 import { Biomechanics3D } from './Biomechanics3D';
+import { OneEuroFilter } from '../lib/Filters';
 
 /**
  * JKD DOJO: ULTIMATE HARDWARE RECOVERY
@@ -22,6 +23,11 @@ export const HolisticTracker: React.FC = () => {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
   
+  // Registration & Precision State
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [registrationProgress, setRegistrationProgress] = useState(0);
+  const filters = useRef<Map<string, OneEuroFilter>>(new Map());
+
   // AI State
   const [voice] = useState(() => new VoiceAI((cmd) => handleVoiceCommand(cmd)));
   const [isAiThinking, setIsAiThinking] = useState(false);
@@ -42,7 +48,7 @@ export const HolisticTracker: React.FC = () => {
 
   // Focus & Pan States
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1.0);
+  const [zoom, setZoom] = useState(1.0); // Reset to 1.0 initially
   const isDragging = useRef(false);
   const startPos = useRef({ x: 0, y: 0 });
 
@@ -117,14 +123,32 @@ export const HolisticTracker: React.FC = () => {
         holistic.onResults((results: any) => {
           if (!results.image) return;
           if (!streamStarted) setStreamStarted(true);
+
+          if (isRegistering) {
+            const complete = logic.registerBody(results.poseLandmarks);
+            setRegistrationProgress(prev => Math.min(100, prev + 1));
+            if (complete) {
+              setIsRegistering(false);
+              coach.feedback("Body metrics registered. Surgical precision engaged.");
+            }
+          }
+
+          // Apply Predictive Filters for Surgical Precision
+          const filteredPose = results.poseLandmarks?.map((lm: any, i: number) => {
+            const fx = getFilter(`p${i}x`).filter(lm.x);
+            const fy = getFilter(`p${i}y`).filter(lm.y);
+            const fz = getFilter(`p${i}z`).filter(lm.z);
+            return { ...lm, x: fx, y: fy, z: fz };
+          }) || null;
+
           setAllLandmarks({
-            pose: results.poseLandmarks || null,
+            pose: filteredPose,
             face: results.faceLandmarks || null,
             leftHand: results.leftHandLandmarks || null,
             rightHand: results.rightHandLandmarks || null,
             imageSize: { width: results.image.width, height: results.image.height }
           });
-          renderDualScreens(results);
+          renderDualScreens({ ...results, poseLandmarks: filteredPose });
         });
 
         console.log("JKD: REQUESTING CAMERA...");
@@ -178,7 +202,14 @@ export const HolisticTracker: React.FC = () => {
       if (stream) stream.getTracks().forEach(t => t.stop());
       if (holistic) holistic.close();
     };
-  }, [active]);
+  }, [active, isRegistering]); // Re-bind if registration state changes
+
+  const getFilter = (id: string) => {
+    if (!filters.current.has(id)) {
+      filters.current.set(id, new OneEuroFilter(0.5, 0.001, 1.0));
+    }
+    return filters.current.get(id)!;
+  };
 
   const renderDualScreens = (results: any) => {
     const rawCtx = canvasRawRef.current?.getContext('2d');
@@ -223,38 +254,47 @@ export const HolisticTracker: React.FC = () => {
 
   if (!active) {
     return (
-      <div className="fixed inset-0 bg-[#050505] flex flex-col items-center justify-center z-[9999] overflow-hidden">
-        {/* Background Visuals */}
-        <div className="absolute inset-0 opacity-20 pointer-events-none">
-          <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_center,_#10b981_0%,_transparent_70%)] blur-[120px]" />
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] border border-[#10b981]/20 rounded-full animate-pulse" />
+      <div className="fixed inset-0 bg-[#020202] flex flex-col items-center justify-center z-[9999] overflow-hidden">
+        {/* SCANNING GRID BACKGROUND */}
+        <div className="absolute inset-0 opacity-40 pointer-events-none">
+          <div className="absolute inset-0 bg-[linear-gradient(rgba(16,185,129,0.05)_1px,_transparent_1px),_linear-gradient(90deg,rgba(16,185,129,0.05)_1px,_transparent_1px)] bg-[size:40px_40px]" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_transparent_0%,_#000_90%)]" />
+          <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-[#10b981]/20 to-transparent animate-[scan_3s_infinite]" />
         </div>
 
-        <div className="relative z-10 flex flex-col items-center gap-16">
-          <div className="flex flex-col items-center gap-4 text-center">
-            <h1 className="text-[#10b981] font-mono text-lg tracking-[1em] uppercase ml-[1em]">JKD Form Engineer</h1>
-            <p className="text-white/40 font-mono text-[10px] uppercase tracking-widest">Sovereign Motion Analysis System</p>
+        <div className="relative z-10 flex flex-col items-center gap-12 max-w-[90vw]">
+          <div className="flex flex-col items-center gap-2 text-center">
+            <h1 className="text-[#10b981] font-mono text-xl tracking-[0.8em] uppercase leading-relaxed">BIOMETRIC PORTAL</h1>
+            <p className="text-white/20 font-mono text-[9px] uppercase tracking-[0.5em]">Establishing Neural-Link v4.0</p>
           </div>
 
+          <div className="w-full h-[1px] bg-gradient-to-r from-transparent via-[#10b981]/40 to-transparent" />
+
           <button 
-            onClick={() => setActive(true)}
-            className="group relative px-20 py-8 bg-transparent border-2 border-[#10b981] overflow-hidden transition-all hover:bg-[#10b981]/10"
+            onClick={() => {
+              setActive(true);
+              setIsRegistering(true);
+              setRegistrationProgress(0);
+            }}
+            className="group relative px-16 py-10 bg-transparent border border-[#10b981]/50 overflow-hidden transition-all hover:bg-[#10b981]/20"
           >
-            <div className="absolute inset-0 bg-[#10b981]/5 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
-            <span className="relative z-10 text-[#10b981] font-mono text-2xl tracking-[0.5em] uppercase group-hover:scale-110 block transition-transform">Enter Dojo</span>
-            <div className="absolute -top-1 -left-1 w-2 h-2 bg-[#10b981]" />
-            <div className="absolute -top-1 -right-1 w-2 h-2 bg-[#10b981]" />
-            <div className="absolute -bottom-1 -left-1 w-2 h-2 bg-[#10b981]" />
-            <div className="absolute -bottom-1 -right-1 w-2 h-2 bg-[#10b981]" />
+            <div className="absolute inset-0 bg-[#10b981]/10 translate-y-full group-hover:translate-y-0 transition-transform duration-500" />
+            <span className="relative z-10 text-[#10b981] font-mono text-xl tracking-[1em] uppercase group-hover:scale-110 block transition-transform text-right">Initiate Tracking</span>
+            
+            {/* Corner Accents */}
+            <div className="absolute top-2 left-2 w-4 h-4 border-l border-t border-[#10b981]" />
+            <div className="absolute top-2 right-2 w-4 h-4 border-r border-t border-[#10b981]" />
+            <div className="absolute bottom-2 left-2 w-4 h-4 border-l border-b border-[#10b981]" />
+            <div className="absolute bottom-2 right-2 w-4 h-4 border-r border-b border-[#10b981]" />
           </button>
           
-          <div className="flex flex-col items-center gap-6">
-            <label className="text-[#10b981]/40 font-mono text-[9px] uppercase tracking-widest">Optical Source Select</label>
+          <div className="flex flex-col items-center gap-4 w-full">
+            <label className="text-[#10b981]/30 font-mono text-[8px] uppercase tracking-widest">Select Optical Feed</label>
             <select 
               title="Optical Source"
               value={selectedDeviceId}
               onChange={(e) => setSelectedDeviceId(e.target.value)}
-              className="bg-black/80 text-[#10b981] border border-[#10b981]/30 px-8 py-3 rounded-none font-mono text-[12px] outline-none focus:border-[#10b981] transition-all hover:bg-[#10b981]/5 appearance-none text-center min-w-[280px]"
+              className="bg-black/90 text-[#10b981] border border-[#10b981]/20 px-6 py-4 rounded-none font-mono text-[10px] outline-none focus:border-[#10b981] transition-all hover:bg-[#10b981]/10 appearance-none text-center min-w-[300px] tracking-widest uppercase"
             >
               {devices.map(device => (
                 <option key={device.deviceId} value={device.deviceId} className="bg-[#050505]">
@@ -288,6 +328,30 @@ export const HolisticTracker: React.FC = () => {
         <div className="pulse-core"></div>
         <span className="ai-label">{isAiThinking ? 'THINKING' : 'LISTENING'}</span>
       </div>
+      
+      {/* REGISTRATION HUD */}
+      {isRegistering && (
+        <div className="fixed inset-0 z-[2000] flex flex-col items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="relative w-64 h-64 flex items-center justify-center">
+            <svg className="w-full h-full rotate-[-90deg]">
+              <circle cx="128" cy="128" r="120" fill="none" stroke="#10b98122" strokeWidth="2" />
+              <circle 
+                cx="128" cy="128" r="120" fill="none" stroke="#10b981" strokeWidth="2" 
+                strokeDasharray="754" strokeDashoffset={754 - (754 * registrationProgress) / 100}
+                className="transition-all duration-300 ease-linear"
+              />
+            </svg>
+            <div className="absolute flex flex-col items-center">
+              <span className="text-[#10b981] font-mono text-xs tracking-[0.5em] animate-pulse">SCANNING</span>
+              <span className="text-white font-mono text-2xl mt-2">{registrationProgress}%</span>
+            </div>
+          </div>
+          <div className="mt-12 flex flex-col items-center gap-2">
+            <p className="text-[#10b981]/60 font-mono text-[10px] uppercase tracking-widest">Registering Body Biometrics</p>
+            <p className="text-white/40 font-mono text-[8px] uppercase tracking-widest">Hold Still for Surgical Calibration</p>
+          </div>
+        </div>
+      )}
       
       {!streamStarted && (
         <div className="fixed inset-0 bg-black flex items-center justify-center z-[1000]">
