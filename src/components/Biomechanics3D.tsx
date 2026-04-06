@@ -56,14 +56,40 @@ const Skeleton: React.FC<Biomechanics3DProps> = ({ pose, face, leftHand, rightHa
     const w = videoSize.width;
     const h = videoSize.height;
     const baseSW = Math.min(w, h / 2.0);
-    const sw = baseSW / zoom;
-    const sh = (baseSW * 2.0) / zoom;
+    let sw = baseSW / zoom;
+    let sh = (baseSW * 2.0) / zoom;
+
     const cx = w / 2 + (pan.x * (w / 1000));
     const cy = h / 2 + (pan.y * (h / 2000));
-    const sx = cx - sw / 2;
-    const sy = cy - sh / 2;
-    const relX = (l.x * w - sx) / sw;
-    const relY = (l.y * h - sy) / sh;
+
+    let sx = cx - sw / 2;
+    let sy = cy - sh / 2;
+
+    // LETTERBOX LOGIC (Matches HolisticTracker)
+    let dx = 0, dy = 0, dw = 1.0, dh = 1.0; 
+    if (sw > w || sh > h) {
+       const ratioS = sw / sh; // 0.5
+       const ratioI = w / h;   
+       if (ratioS > ratioI) {
+          dw = ratioI / ratioS;
+          dx = (1.0 - dw) / 2;
+          sw = w;
+          sh = w / ratioS;
+          sx = 0;
+          sy = (h - sh) / 2;
+       } else {
+          dh = ratioS / ratioI;
+          dy = (1.0 - dh) / 2;
+          sh = h;
+          sw = h * ratioS;
+          sy = 0;
+          sx = (w - sw) / 2;
+       }
+    }
+
+    const relX = dx + dw * (l.x * w - sx) / sw;
+    const relY = dy + dh * (l.y * h - sy) / sh;
+    
     const xBase = mirror ? (0.5 - relX) : (relX - 0.5);
     const yBase = 1.0 - (relY * 2.0);
     // STICK PRECISELY: No multiplier on position. 

@@ -93,7 +93,7 @@ export const HolisticTracker: React.FC = () => {
   const handleMouseUp = () => { isDragging.current = false; };
   const handleDoubleClick = () => { panRef.current = { x: 0, y: 0 }; setPan({ x: 0, y: 0 }); handleZoomChange(1.0); };
   const handleWheel = (e: React.WheelEvent) => {
-    const next = Math.max(1, Math.min(5, zoom - e.deltaY * 0.002));
+    const next = Math.max(0.5, Math.min(10, zoom - e.deltaY * 0.002));
     handleZoomChange(next);
   };
 
@@ -195,7 +195,7 @@ export const HolisticTracker: React.FC = () => {
           }
 
           if (zoomVelocity !== 0) {
-            const nextZoom = Math.max(1, Math.min(5, zoomRef.current + zoomVelocity));
+            const nextZoom = Math.max(0.5, Math.min(10, zoomRef.current + zoomVelocity));
             if (nextZoom !== zoomRef.current) {
                zoomRef.current = nextZoom;
                setZoom(nextZoom);
@@ -282,20 +282,50 @@ export const HolisticTracker: React.FC = () => {
     const currentPan = panRef.current;
 
     // Maintain the 1:2 source window for consistency across desktop and mobile
-    // Fix for "always zoomed in": if zoom is 1.0, minimize crop
     const baseSW = Math.min(w, h / 2.0);
-    const sw = baseSW / currentZoom;
-    const sh = (baseSW * 2.0) / currentZoom;
+    let sw = baseSW / currentZoom;
+    let sh = (baseSW * 2.0) / currentZoom;
 
+    // CENTER NORMALLY
     const cx = w / 2 + (currentPan.x * (w / 1000));
     const cy = h / 2 + (currentPan.y * (h / 2000));
 
-    const sx = cx - sw / 2;
-    const sy = cy - sh / 2;
+    let sx = cx - sw / 2;
+    let sy = cy - sh / 2;
 
     ctx.translate(canvas.width, 0);
     ctx.scale(-1, 1);
-    ctx.drawImage(results.image, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    
+    // NEGATIVE ZOOM: If SW/SH exceed source dimensions, letterbox it
+    let dx = 0, dy = 0, dw = canvas.width, dh = canvas.height;
+    
+    if (sw > w || sh > h) {
+       // Calculation for letterboxing
+       const ratioS = sw / sh; // Requested ratio (always 1:2)
+       const ratioI = w / h;   // Input ratio (e.g. 16:9)
+       
+       if (ratioS > ratioI) {
+          // Wider than source -> Pillarbox
+          const scale = canvas.height / sh;
+          dw = w * scale;
+          dx = (canvas.width - dw) / 2;
+          sw = w;
+          sh = w / ratioS;
+          sx = 0;
+          sy = (h - sh) / 2;
+       } else {
+          // Taller than source -> Letterbox
+          const scale = canvas.width / sw;
+          dh = h * scale;
+          dy = (canvas.height - dh) / 2;
+          sh = h;
+          sw = h * ratioS;
+          sy = 0;
+          sx = (w - sw) / 2;
+       }
+    }
+
+    ctx.drawImage(results.image, sx, sy, sw, sh, dx, dy, dw, dh);
     
     if (index === 1 && results.poseLandmarks) {
       const analysis = logic.analyze(results.poseLandmarks);
@@ -389,8 +419,8 @@ export const HolisticTracker: React.FC = () => {
         <input 
           id="zoom-slider"
           type="range" 
-          min="1" 
-          max="5" 
+          min="0.5" 
+          max="10" 
           step="0.1" 
           value={zoom} 
           title="Camera Zoom"
