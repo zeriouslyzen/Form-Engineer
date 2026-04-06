@@ -44,7 +44,8 @@ export const HolisticTracker: React.FC = () => {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1.0);
   const [skeletonScale, setSkeletonScale] = useState(1.0); 
-  const [gesturesEnabled, setGesturesEnabled] = useState(true); // Gesture Toggle
+  const [gesturesEnabled, setGesturesEnabled] = useState(true); 
+  const gesturesEnabledRef = useRef(true); // Fix stale toggle
   const zoomRef = useRef(1.0);
   const panRef = useRef({ x: 0, y: 0 });
   const videoTrackRef = useRef<MediaStreamTrack | null>(null);
@@ -55,6 +56,7 @@ export const HolisticTracker: React.FC = () => {
   // Sync state to refs for use in the rendering loop (stale-closure fix)
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   useEffect(() => { panRef.current = pan; }, [pan]);
+  useEffect(() => { gesturesEnabledRef.current = gesturesEnabled; }, [gesturesEnabled]);
 
   const applyHardwareZoom = async (value: number) => {
     const track = videoTrackRef.current;
@@ -175,7 +177,7 @@ export const HolisticTracker: React.FC = () => {
           if (!results.image) return;
           if (!streamStarted) setStreamStarted(true);
 
-          if (gesturesEnabled) {
+          if (gesturesEnabledRef.current) {
             // Handle Gesture Recognition
             const leftHandGesture = logic.detectHandGesture(results.leftHandLandmarks);
             const rightHandGesture = logic.detectHandGesture(results.rightHandLandmarks);

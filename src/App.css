@@ -52,7 +52,7 @@ body {
   }
   .ai-pulse {
     top: 16px;
-    right: 16px;
+    left: 16px;
   }
 }
 
@@ -119,7 +119,7 @@ canvas {
 .ai-pulse {
   position: fixed;
   top: 32px;
-  right: 32px;
+  left: 32px;
   display: flex;
   flex-direction: column;
   align-items: center;
