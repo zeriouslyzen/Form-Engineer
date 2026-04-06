@@ -371,12 +371,12 @@ export const HolisticTracker: React.FC = () => {
       <video ref={videoRef} className="hidden" muted playsInline autoPlay />
       
       {/* AI PULSE / GESTURE HUD */}
-      <div className={`ai-pulse ${isAiThinking ? 'thinking' : ''}`}>
+      <div className={`ai-pulse ${isAiThinking ? 'thinking' : ''}`} onMouseDown={(e) => e.stopPropagation()}>
         <div className="pulse-ring"></div>
         <div className="pulse-core"></div>
         <button 
            className={`gesture-toggle ${gesturesEnabled ? 'enabled' : 'disabled'}`}
-           onClick={() => setGesturesEnabled(!gesturesEnabled)}
+           onClick={(e) => { e.stopPropagation(); setGesturesEnabled(!gesturesEnabled); }}
            title="Toggle Gesture Control"
         >
           {gesturesEnabled ? 'GESTURES: ON' : 'GESTURES: OFF'}
@@ -384,7 +384,7 @@ export const HolisticTracker: React.FC = () => {
       </div>
 
       {/* ZOOM & SIZE CONTROLS */}
-      <div className="zoom-knob-container">
+      <div className="zoom-knob-container" onMouseDown={(e) => e.stopPropagation()}>
         <label htmlFor="zoom-slider">Cam Zoom</label>
         <input 
           id="zoom-slider"

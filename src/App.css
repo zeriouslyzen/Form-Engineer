@@ -96,6 +96,7 @@ canvas {
   border: 1px solid rgba(16, 185, 129, 0.3);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
+  pointer-events: none; /* Let clicks pass through to background */
 }
 
 .zoom-knob-input {
@@ -105,6 +106,7 @@ canvas {
   height: 300px;
   accent-color: #10b981;
   cursor: pointer;
+  pointer-events: auto; /* Enable clicks for the slider itself */
 }
 
 .zoom-knob-container label {
@@ -125,6 +127,7 @@ canvas {
   align-items: center;
   gap: 8px;
   z-index: 1001;
+  pointer-events: none; /* Let clicks pass through */
 }
 
 .pulse-ring {
@@ -135,6 +138,7 @@ canvas {
   border: 1px solid rgba(16, 185, 129, 0.4);
   position: absolute;
   animation: pulse 2s infinite ease-out;
+  pointer-events: none; /* Do not block clicks */
 }
 
 .pulse-core {
@@ -146,6 +150,7 @@ canvas {
   position: relative;
   z-index: 2;
   transition: all 0.3s ease;
+  pointer-events: none; /* Do not block clicks */
 }
 
 .ai-pulse.thinking .pulse-core {
@@ -185,6 +190,7 @@ canvas {
   z-index: 10;
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
+  pointer-events: auto; /* Re-enable clicks for the button */
 }
 
 .gesture-toggle.disabled {
