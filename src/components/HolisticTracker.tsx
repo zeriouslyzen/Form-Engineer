@@ -43,8 +43,38 @@ export const HolisticTracker: React.FC = () => {
   // Focus & Pan States
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1.0);
+  const zoomRef = useRef(1.0);
+  const panRef = useRef({ x: 0, y: 0 });
+  const videoTrackRef = useRef<MediaStreamTrack | null>(null);
+  
   const isDragging = useRef(false);
   const startPos = useRef({ x: 0, y: 0 });
+
+  // Sync state to refs for use in the rendering loop (stale-closure fix)
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+  useEffect(() => { panRef.current = pan; }, [pan]);
+
+  const applyHardwareZoom = async (value: number) => {
+    const track = videoTrackRef.current;
+    if (!track) return;
+    try {
+      const capabilities = track.getCapabilities() as any;
+      if (capabilities.zoom) {
+        const min = capabilities.zoom.min || 1;
+        const max = capabilities.zoom.max || 10;
+        // Map our 1-5 slider to the hardware's range
+        const hardwareZoom = min + (value - 1) * (max - min) / 4; 
+        await track.applyConstraints({ advanced: [{ zoom: hardwareZoom }] as any });
+      }
+    } catch (e) {
+      console.warn("JKD: Hardware zoom not supported or failed", e);
+    }
+  };
+
+  const handleZoomChange = (value: number) => {
+    setZoom(value);
+    applyHardwareZoom(value);
+  };
 
   const handleMouseDown = (e: React.MouseEvent) => {
     isDragging.current = true;
@@ -57,8 +87,11 @@ export const HolisticTracker: React.FC = () => {
   };
 
   const handleMouseUp = () => { isDragging.current = false; };
-  const handleDoubleClick = () => { setPan({ x: 0, y: 0 }); setZoom(1.1); };
-  const handleWheel = (e: React.WheelEvent) => setZoom(prev => Math.max(1, Math.min(5, prev - e.deltaY * 0.002)));
+  const handleDoubleClick = () => { panRef.current = { x: 0, y: 0 }; setPan({ x: 0, y: 0 }); handleZoomChange(1.0); };
+  const handleWheel = (e: React.WheelEvent) => {
+    const next = Math.max(1, Math.min(5, zoom - e.deltaY * 0.002));
+    handleZoomChange(next);
+  };
 
   const handleVoiceCommand = async (command: string) => {
     setIsAiThinking(true);
@@ -135,6 +168,11 @@ export const HolisticTracker: React.FC = () => {
           audio: false
         };
         stream = await navigator.mediaDevices.getUserMedia(constraints);
+        const track = stream.getVideoTracks()[0];
+        videoTrackRef.current = track;
+        
+        // Initial hardware zoom check/apply
+        applyHardwareZoom(zoomRef.current);
         
         const processFrame = async () => {
            if (videoRef.current && holistic && !videoRef.current.paused) {
@@ -200,13 +238,18 @@ export const HolisticTracker: React.FC = () => {
     const w = results.image.width;
     const h = results.image.height;
     
-    // Maintain the 1:2 source window for consistency across desktop and mobile
-    const baseSW = Math.min(w, h / 2.0);
-    const sw = baseSW / zoom;
-    const sh = (baseSW * 2.0) / zoom;
+    // Use refs to avoid stale closure lags
+    const currentZoom = zoomRef.current;
+    const currentPan = panRef.current;
 
-    const cx = w / 2 + (pan.x * (w / 1000));
-    const cy = h / 2 + (pan.y * (h / 2000));
+    // Maintain the 1:2 source window for consistency across desktop and mobile
+    // Fix for "always zoomed in": if zoom is 1.0, minimize crop
+    const baseSW = Math.min(w, h / 2.0);
+    const sw = baseSW / currentZoom;
+    const sh = (baseSW * 2.0) / currentZoom;
+
+    const cx = w / 2 + (currentPan.x * (w / 1000));
+    const cy = h / 2 + (currentPan.y * (h / 2000));
 
     const sx = cx - sw / 2;
     const sy = cy - sh / 2;
@@ -306,7 +349,7 @@ export const HolisticTracker: React.FC = () => {
           step="0.1" 
           value={zoom} 
           title="Zoom"
-          onChange={(e) => setZoom(parseFloat(e.target.value))}
+          onChange={(e) => handleZoomChange(parseFloat(e.target.value))}
           className="zoom-knob-input"
         />
         <span className="text-emerald-500 font-mono text-[10px] mt-1">{zoom.toFixed(1)}x</span>
