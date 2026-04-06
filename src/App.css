@@ -1,0 +1,168 @@
+:root {
+  background-color: #000;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  margin: 0;
+  background: #000;
+  overflow: hidden;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+}
+
+.dojo-container {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: row;
+  background: #000;
+  margin: 0;
+  padding: 0;
+}
+
+.iphone-pillar {
+  width: 50vw;
+  height: 100vh;
+  background: #000;
+  overflow: hidden;
+  position: relative;
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+}
+
+canvas {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.mirror {
+  transform: scaleX(-1);
+}
+
+.hidden {
+  display: none !important;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+.zoom-knob-container {
+  position: fixed;
+  right: 32px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 20px 10px;
+  border-radius: 40px;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+.zoom-knob-input {
+  writing-mode: bt-lr; /* Vertical slider */
+  appearance: slider-vertical;
+  width: 8px;
+  height: 300px;
+  accent-color: #10b981;
+  cursor: pointer;
+}
+
+.zoom-knob-container label {
+  color: #10b981;
+  font-family: monospace;
+  font-size: 10px;
+  margin-bottom: 12px;
+  letter-spacing: 0.2em;
+}
+
+/* AI PULSE */
+.ai-pulse {
+  position: fixed;
+  top: 32px;
+  right: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 1001;
+}
+
+.pulse-ring {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(16, 185, 129, 0.2);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  position: absolute;
+  animation: pulse 2s infinite ease-out;
+}
+
+.pulse-core {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 20px #10b981;
+  position: relative;
+  z-index: 2;
+  transition: all 0.3s ease;
+}
+
+.ai-pulse.thinking .pulse-core {
+  background: #00ffff;
+  box-shadow: 0 0 30px #00ffff;
+  transform: scale(1.5);
+}
+
+.ai-pulse.thinking .pulse-ring {
+  border-color: #00ffff;
+  background: rgba(0, 255, 255, 0.1);
+  animation-duration: 0.5s;
+}
+
+.ai-label {
+  color: #10b981;
+  font-family: monospace;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.4em;
+  text-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+  margin-top: 20px;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 0.8; }
+  100% { transform: scale(2.5); opacity: 0; }
+}
+
+/* 3D OVERLAY */
+canvas {
+  pointer-events: none;
+}
+
+.biomechanics-3d-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
