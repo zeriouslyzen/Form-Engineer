@@ -3,20 +3,20 @@ import { JKDLogic } from '../lib/JKDLogic';
 import { AudioCoach } from '../lib/AudioService';
 import { VoiceAI } from '../lib/VoiceAI';
 import { Biomechanics3D } from './Biomechanics3D';
+import { tracking } from '../lib/TrackingEngine';
 
 /**
- * JKD DOJO: ULTIMATE HARDWARE RECOVERY
- * Robust click-to-start, high-visibility diagnostics, and standard stream loop.
+ * JKD DOJO: SINGLE-SCREEN MASTER EDITION
+ * Optimized for mobile/iPhone-to-Mac Continuity.
  */
 
 export const HolisticTracker: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRawRef = useRef<HTMLCanvasElement>(null);
   const canvasEngRef = useRef<HTMLCanvasElement>(null);
   
   const [logic] = useState(() => new JKDLogic());
   const [coach] = useState(() => new AudioCoach());
-  
+
   const [active, setActive] = useState(false);
   const [streamStarted, setStreamStarted] = useState(false);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
@@ -39,13 +39,15 @@ export const HolisticTracker: React.FC = () => {
     rightHand: null,
     imageSize: { width: 1280, height: 720 }
   });
+  const [cropInfo, setCropInfo] = useState({ sx: 0, sy: 0, sw: 1280, sh: 720 });
+  const [videoViewport, setVideoViewport] = useState({ width: 0, height: 0, top: 0, left: 0 });
 
   // Focus & Pan States
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1.0);
   const [skeletonScale, setSkeletonScale] = useState(1.0); 
-  const [gesturesEnabled, setGesturesEnabled] = useState(true); 
-  const gesturesEnabledRef = useRef(true); // Fix stale toggle
+
+  const gesturesEnabledRef = useRef(true); 
   const zoomRef = useRef(1.0);
   const panRef = useRef({ x: 0, y: 0 });
   const videoTrackRef = useRef<MediaStreamTrack | null>(null);
@@ -56,7 +58,50 @@ export const HolisticTracker: React.FC = () => {
   // Sync state to refs for use in the rendering loop (stale-closure fix)
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   useEffect(() => { panRef.current = pan; }, [pan]);
-  useEffect(() => { gesturesEnabledRef.current = gesturesEnabled; }, [gesturesEnabled]);
+  useEffect(() => { gesturesEnabledRef.current = true; }, []);
+
+  // VIEWPORT SYNC MATH: Find the exact visible rectangle of the 'contained' video
+  useEffect(() => {
+    const updateViewport = () => {
+      if (!canvasEngRef.current) return;
+      const canvas = canvasEngRef.current;
+      const parent = canvas.parentElement;
+      if (!parent) return;
+
+      const pW = parent.clientWidth;
+      const pH = parent.clientHeight;
+      const cW = canvas.width;
+      const cH = canvas.height;
+      if (cW === 0 || cH === 0) return;
+
+      const vAspect = cW / cH;
+      const pAspect = pW / pH;
+
+      let rW, rH, rT, rL;
+      if (pAspect > vAspect) { // Pillarbox
+        rH = pH;
+        rW = rH * vAspect;
+        rT = 0;
+        rL = (pW - rW) / 2;
+      } else { // Letterbox
+        rW = pW;
+        rH = rW / vAspect;
+        rT = (pH - rH) / 2;
+        rL = 0;
+      }
+      
+      setVideoViewport(prev => {
+          if (Math.abs(prev.width - rW) < 1 && Math.abs(prev.height - rH) < 1 && Math.abs(prev.top - rT) < 1 && Math.abs(prev.left - rL) < 1) {
+            return prev;
+          }
+          return { width: rW, height: rH, top: rT, left: rL };
+      });
+    };
+
+    updateViewport();
+    window.addEventListener('resize', updateViewport);
+    return () => window.removeEventListener('resize', updateViewport);
+  }, [allLandmarks.imageSize.width, allLandmarks.imageSize.height]);
 
   const applyHardwareZoom = async (value: number) => {
     const track = videoTrackRef.current;
@@ -66,7 +111,6 @@ export const HolisticTracker: React.FC = () => {
       if (capabilities.zoom) {
         const min = capabilities.zoom.min || 1;
         const max = capabilities.zoom.max || 10;
-        // Map our 1-5 slider to the hardware's range
         const hardwareZoom = min + (value - 1) * (max - min) / 4; 
         await track.applyConstraints({ advanced: [{ zoom: hardwareZoom }] as any });
       }
@@ -93,7 +137,7 @@ export const HolisticTracker: React.FC = () => {
   const handleMouseUp = () => { isDragging.current = false; };
   const handleDoubleClick = () => { panRef.current = { x: 0, y: 0 }; setPan({ x: 0, y: 0 }); handleZoomChange(1.0); };
   const handleWheel = (e: React.WheelEvent) => {
-    const next = Math.max(0.5, Math.min(10, zoom - e.deltaY * 0.002));
+    const next = Math.max(1.0, Math.min(10, zoom - e.deltaY * 0.002));
     handleZoomChange(next);
   };
 
@@ -107,7 +151,6 @@ export const HolisticTracker: React.FC = () => {
   useEffect(() => {
     const getDevices = async () => {
       try {
-        // Request permission once to get labels
         await navigator.mediaDevices.getUserMedia({ video: true });
         const devs = await navigator.mediaDevices.enumerateDevices();
         const videoDevs = devs.filter(d => d.kind === 'videoinput');
@@ -118,16 +161,10 @@ export const HolisticTracker: React.FC = () => {
       }
     };
     getDevices();
-
-    // Hot-plugging discovery for Samsung/Android USB cameras
-    navigator.mediaDevices.ondevicechange = () => {
-      console.log("JKD: Hardware change detected. Refreshing optical sources...");
-      getDevices();
-    };
+    navigator.mediaDevices.ondevicechange = getDevices;
   }, []);
 
   useEffect(() => {
-    console.log("JKD: COMPONENT MOUNTED. Active:", active);
     if (!active) return;
     
     let holistic: any;
@@ -135,12 +172,9 @@ export const HolisticTracker: React.FC = () => {
     let animationFrameId: number;
 
     const init = async () => {
-      console.log("JKD: INITIALIZING DOJO ENGINES...");
       try {
         const HolisticClass = (window as any).Holistic;
-        
         if (!HolisticClass) {
-           console.warn("JKD: WAITING FOR GLOBAL SCRIPTS...");
            setTimeout(init, 500); 
            return;
         }
@@ -157,7 +191,6 @@ export const HolisticTracker: React.FC = () => {
           refineFaceLandmarks: true,
         });
 
-        console.log("JKD: REQUESTING CAMERA...");
         const constraints: MediaStreamConstraints = {
           video: selectedDeviceId 
             ? { deviceId: { exact: selectedDeviceId }, width: { ideal: 720 }, height: { ideal: 1280 } }
@@ -165,52 +198,38 @@ export const HolisticTracker: React.FC = () => {
           audio: false
         };
         stream = await navigator.mediaDevices.getUserMedia(constraints);
-        const videoTrack = stream.getVideoTracks()[0];
-        videoTrackRef.current = videoTrack;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+          console.log("JKD: Optical stream active.");
+        }
         
-        // Initial hardware zoom check/apply
         applyHardwareZoom(zoomRef.current);
-
-        let zoomVelocity = 0; // Local velocity for gesture interpolation
 
         holistic.onResults((results: any) => {
           if (!results.image) return;
           if (!streamStarted) setStreamStarted(true);
 
-          if (gesturesEnabledRef.current) {
-            // Handle Gesture Recognition
-            const leftHandGesture = logic.detectHandGesture(results.leftHandLandmarks);
-            const rightHandGesture = logic.detectHandGesture(results.rightHandLandmarks);
-            const gesture = leftHandGesture || rightHandGesture;
-
-            if (gesture === 'FIVE') zoomVelocity = 0.02; // Slower, smoother zoom
-            else if (gesture === 'THUMBS_DOWN') zoomVelocity = -0.02;
-            else zoomVelocity = 0; // Default to stop if no command gesture is visible
-
-            // Independent Skeleton Scale Gestures
-            if (gesture === 'ONE') setSkeletonScale(prev => Math.min(3, prev + 0.02));
-            else if (gesture === 'TWO') setSkeletonScale(prev => Math.max(0.2, prev - 0.02));
-          } else {
-            zoomVelocity = 0;
+          // APPLY MEDICAL SMOOTHING (Kalman Filter)
+          const smoothedResults = tracking.smooth(results);
+          
+          if (results.image) {
+            renderSingleScreen(results);
           }
-
-          if (zoomVelocity !== 0) {
-            const nextZoom = Math.max(0.5, Math.min(10, zoomRef.current + zoomVelocity));
-            if (nextZoom !== zoomRef.current) {
-               zoomRef.current = nextZoom;
-               setZoom(nextZoom);
-               applyHardwareZoom(nextZoom);
-            }
-          }
-
-          setAllLandmarks({
-            pose: results.poseLandmarks || null,
-            face: results.faceLandmarks || null,
-            leftHand: results.leftHandLandmarks || null,
-            rightHand: results.rightHandLandmarks || null,
-            imageSize: { width: results.image.width, height: results.image.height }
+          
+          setAllLandmarks(prev => {
+            const w = results.image.width;
+            const h = results.image.height;
+            const sizeChanged = prev.imageSize.width !== w || prev.imageSize.height !== h;
+            
+            return {
+              pose: smoothedResults.poseLandmarks || null,
+              face: results.faceLandmarks || null,
+              leftHand: results.leftHandLandmarks || null,
+              rightHand: results.rightHandLandmarks || null,
+              imageSize: sizeChanged ? { width: w, height: h } : prev.imageSize
+            };
           });
-          renderDualScreens(results);
         });
 
         const processFrame = async () => {
@@ -219,115 +238,72 @@ export const HolisticTracker: React.FC = () => {
            }
            animationFrameId = requestAnimationFrame(processFrame);
         };
-
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-          console.log("JKD: VIDEO PLAYING.");
-          processFrame();
-        }
+        processFrame();
 
       } catch (err: any) {
-        console.error("JKD CRITICAL ERROR:", err.name, err.message);
-        alert(`Hardware Error: ${err.name}. Please ensure your iPhone is connected.`);
+        console.error("JKD CRITICAL ERROR:", err);
       }
     };
 
     init();
-
     voice.start();
 
-    // Proactive Feedback Loop
-    const proactiveInterval = setInterval(async () => {
-      if (stats.punches > 0 || stats.telegraphs > 0) {
-        setIsAiThinking(true);
-        const response = await voice.chat("Give me a one-sentence tip based on my current stats.", stats);
-        setIsAiThinking(false);
-        coach.feedback(response);
-      }
-    }, 45000); // Every 45 seconds
-
     return () => {
-      console.log("JKD: CLEANING UP...");
       voice.stop();
-      clearInterval(proactiveInterval);
       cancelAnimationFrame(animationFrameId);
       if (stream) stream.getTracks().forEach(t => t.stop());
       if (holistic) holistic.close();
     };
   }, [active]);
 
-  const renderDualScreens = (results: any) => {
-    const rawCtx = canvasRawRef.current?.getContext('2d');
-    const engCtx = canvasEngRef.current?.getContext('2d');
+  const renderSingleScreen = (results: any) => {
+    if (!canvasEngRef.current) return;
+    const canvas = canvasEngRef.current;
     
-    // We handle individual contexts so mobile (where raw is hidden) still works
-    if (rawCtx) {
-      drawToCanvas(rawCtx, canvasRawRef.current!, results, 0);
+    // DYNAMIC RESOLUTION: Sync canvas pixels with optical source
+    if (canvas.width !== results.image.width || canvas.height !== results.image.height) {
+      canvas.width = results.image.width;
+      canvas.height = results.image.height;
     }
-    if (engCtx) {
-      drawToCanvas(engCtx, canvasEngRef.current!, results, 1);
-    }
+
+    const engCtx = canvas.getContext('2d');
+    if (engCtx) drawToCanvas(engCtx, canvas, results);
   };
 
-  const drawToCanvas = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, results: any, index: number) => {
+  const drawToCanvas = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, results: any) => {
     ctx.save();
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
     const w = results.image.width;
     const h = results.image.height;
-    
-    // Use refs to avoid stale closure lags
-    const currentZoom = zoomRef.current;
-    const currentPan = panRef.current;
+    if (w === 0 || h === 0) return;
 
-    // Maintain the 1:2 source window for consistency across desktop and mobile
-    const baseSW = Math.min(w, h / 2.0);
-    let sw = baseSW / currentZoom;
-    let sh = (baseSW * 2.0) / currentZoom;
+    // FULL-FRAME CROP: Adapt to camera aspect and zoom without forced 3.5x magnification
+    const zoomVal = zoomRef.current;
+    const panVal = panRef.current;
 
-    // CENTER NORMALLY
-    const cx = w / 2 + (currentPan.x * (w / 1000));
-    const cy = h / 2 + (currentPan.y * (h / 2000));
+    const sw = w / zoomVal;
+    const sh = h / zoomVal;
 
-    let sx = cx - sw / 2;
-    let sy = cy - sh / 2;
+    const cx = w / 2 + (panVal.x * (w / 1000));
+    const cy = h / 2 + (panVal.y * (h / 2000));
+
+    const sx = Math.max(0, Math.min(w - sw, cx - sw / 2));
+    const sy = Math.max(0, Math.min(h - sh, cy - sh / 2));
+
+    // STABLE STATE UPDATE: Prevent infinite recursion loop
+    setCropInfo(prev => {
+      if (Math.abs(prev.sx - sx) < 1 && Math.abs(prev.sy - sy) < 1 && Math.abs(prev.sw - sw) < 1 && Math.abs(prev.sh - sh) < 1) {
+        return prev;
+      }
+      return { sx, sy, sw, sh };
+    });
 
     ctx.translate(canvas.width, 0);
     ctx.scale(-1, 1);
+    ctx.drawImage(results.image, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
     
-    // NEGATIVE ZOOM: If SW/SH exceed source dimensions, letterbox it
-    let dx = 0, dy = 0, dw = canvas.width, dh = canvas.height;
-    
-    if (sw > w || sh > h) {
-       // Calculation for letterboxing
-       const ratioS = sw / sh; // Requested ratio (always 1:2)
-       const ratioI = w / h;   // Input ratio (e.g. 16:9)
-       
-       if (ratioS > ratioI) {
-          // Wider than source -> Pillarbox
-          const scale = canvas.height / sh;
-          dw = w * scale;
-          dx = (canvas.width - dw) / 2;
-          sw = w;
-          sh = w / ratioS;
-          sx = 0;
-          sy = (h - sh) / 2;
-       } else {
-          // Taller than source -> Letterbox
-          const scale = canvas.width / sw;
-          dh = h * scale;
-          dy = (canvas.height - dh) / 2;
-          sh = h;
-          sw = h * ratioS;
-          sy = 0;
-          sx = (w - sw) / 2;
-       }
-    }
-
-    ctx.drawImage(results.image, sx, sy, sw, sh, dx, dy, dw, dh);
-    
-    if (index === 1 && results.poseLandmarks) {
+    if (results.poseLandmarks) {
       const analysis = logic.analyze(results.poseLandmarks);
       if (analysis.event === 'PUNCH_END') setStats(prev => ({ ...prev, punches: prev.punches + 1 }));
       if (analysis.event === 'TELEGRAPH') {
@@ -341,49 +317,26 @@ export const HolisticTracker: React.FC = () => {
   if (!active) {
     return (
       <div className="fixed inset-0 bg-[#050505] flex flex-col items-center justify-center z-[9999] overflow-hidden">
-        {/* Background Visuals */}
         <div className="absolute inset-0 opacity-20 pointer-events-none">
           <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_center,_#10b981_0%,_transparent_70%)] blur-[120px]" />
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] border border-[#10b981]/20 rounded-full animate-pulse" />
         </div>
-
         <div className="relative z-10 flex flex-col items-center gap-16">
-          <div className="flex flex-col items-center gap-4 text-center">
-            <h1 className="text-[#10b981] font-mono text-lg tracking-[1em] uppercase ml-[1em]">JKD Form Engineer</h1>
-            <p className="text-white/40 font-mono text-[10px] uppercase tracking-widest">Sovereign Motion Analysis System</p>
-          </div>
-
-          <button 
-            onClick={() => setActive(true)}
-            className="group relative px-20 py-8 bg-transparent border-2 border-[#10b981] overflow-hidden transition-all hover:bg-[#10b981]/10"
-          >
-            <div className="absolute inset-0 bg-[#10b981]/5 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
-            <span className="relative z-10 text-[#10b981] font-mono text-2xl tracking-[0.5em] uppercase group-hover:scale-110 block transition-transform">Enter Dojo</span>
-            <div className="absolute -top-1 -left-1 w-2 h-2 bg-[#10b981]" />
-            <div className="absolute -top-1 -right-1 w-2 h-2 bg-[#10b981]" />
-            <div className="absolute -bottom-1 -left-1 w-2 h-2 bg-[#10b981]" />
-            <div className="absolute -bottom-1 -right-1 w-2 h-2 bg-[#10b981]" />
+          <h1 className="text-[#10b981] font-mono text-lg tracking-[1em] uppercase">JKD Form Engineer</h1>
+          <button onClick={() => setActive(true)} className="px-20 py-8 border-2 border-[#10b981] text-[#10b981] font-mono text-2xl tracking-[0.5em] uppercase hover:bg-[#10b981]/10">
+            Enter Dojo
           </button>
-          
-          <div className="flex flex-col items-center gap-6">
-            <label className="text-[#10b981]/40 font-mono text-[9px] uppercase tracking-widest">Optical Source Select</label>
-            <select 
-              title="Optical Source"
-              value={selectedDeviceId}
-              onChange={(e) => setSelectedDeviceId(e.target.value)}
-              className="bg-black/80 text-[#10b981] border border-[#10b981]/30 px-8 py-3 rounded-none font-mono text-[12px] outline-none focus:border-[#10b981] transition-all hover:bg-[#10b981]/5 appearance-none text-center min-w-[280px]"
-            >
-              {devices.map(device => (
-                <option key={device.deviceId} value={device.deviceId} className="bg-[#050505]">
-                  {device.label || `CAM_0${devices.indexOf(device) + 1}`}
-                </option>
-              ))}
-              {devices.length === 0 && <option value="">SEARCHING SOURCES...</option>}
-            </select>
-          </div>
+          <select 
+            value={selectedDeviceId}
+            onChange={(e) => setSelectedDeviceId(e.target.value)}
+            className="bg-black text-[#10b981] border border-[#10b981]/30 px-8 py-3 font-mono text-[12px]"
+            title="Camera Selection"
+            aria-label="Select camera input"
+          >
+            {devices.map(device => (
+              <option key={device.deviceId} value={device.deviceId}>{device.label || `CAM_0${devices.indexOf(device) + 1}`}</option>
+            ))}
+          </select>
         </div>
-
-        <div className="absolute bottom-12 text-white/10 font-mono text-[8px] uppercase tracking-[1em]">Symphony of Motion v2.4 // Global Node // {new Date().getFullYear()}</div>
       </div>
     );
   }
@@ -394,80 +347,29 @@ export const HolisticTracker: React.FC = () => {
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
       onDoubleClick={handleDoubleClick}
       onWheel={handleWheel}
     >
       <video ref={videoRef} className="hidden" muted playsInline autoPlay />
       
-      {/* AI PULSE / GESTURE HUD */}
       <div className={`ai-pulse ${isAiThinking ? 'thinking' : ''}`} onMouseDown={(e) => e.stopPropagation()}>
         <div className="pulse-ring"></div>
         <div className="pulse-core"></div>
-        <button 
-           className={`gesture-toggle ${gesturesEnabled ? 'enabled' : 'disabled'}`}
-           onClick={(e) => { e.stopPropagation(); setGesturesEnabled(!gesturesEnabled); }}
-           title="Toggle Gesture Control"
-        >
-          {gesturesEnabled ? 'GESTURES: ON' : 'GESTURES: OFF'}
-        </button>
+        {/* Legacy controls removed for Medical Precision V3.0 */}
       </div>
 
-      {/* ZOOM & SIZE CONTROLS */}
-      <div className="zoom-knob-container" onMouseDown={(e) => e.stopPropagation()}>
-        <label htmlFor="zoom-slider">Cam Zoom</label>
-        <input 
-          id="zoom-slider"
-          type="range" 
-          min="0.5" 
-          max="10" 
-          step="0.1" 
-          value={zoom} 
-          title="Camera Zoom"
-          onChange={(e) => handleZoomChange(parseFloat(e.target.value))}
-          className="zoom-knob-input"
+      <div className="iphone-pillar full-screen">
+        <canvas ref={canvasEngRef} className="w-full h-full" />
+        <Biomechanics3D 
+          pose={allLandmarks.pose} 
+          face={allLandmarks.face} 
+          leftHand={allLandmarks.leftHand} 
+          rightHand={allLandmarks.rightHand} 
+          skeletonScale={skeletonScale} 
+          videoSize={allLandmarks.imageSize} 
+          cropInfo={cropInfo}
+          videoViewport={videoViewport}
         />
-        <span className="text-emerald-500 font-mono text-[10px] mt-1 mb-4">{zoom.toFixed(1)}x</span>
-        
-        <label htmlFor="size-slider">Skeleton</label>
-        <input 
-          id="size-slider"
-          type="range" 
-          min="0.2" 
-          max="3" 
-          step="0.1" 
-          value={skeletonScale} 
-          title="Graphic Size"
-          onChange={(e) => setSkeletonScale(parseFloat(e.target.value))}
-          className="zoom-knob-input"
-        />
-        <span className="text-cyan-400 font-mono text-[10px] mt-1">{skeletonScale.toFixed(1)}x</span>
-      </div>
-
-      {!streamStarted && (
-        <div className="fixed inset-0 bg-black flex items-center justify-center z-50">
-          <div className="text-emerald-500 font-mono text-lg animate-pulse tracking-widest">WAKING OPTICS...</div>
-        </div>
-      )}
-
-      {/* HUD ELEMENTS */}
-
-      <div className="iphone-pillar desktop-only">
-        <canvas ref={canvasRawRef} width={1000} height={2000} className="w-full h-full" />
-      </div>
-      <div className="iphone-pillar full-mobile">
-        <canvas ref={canvasEngRef} width={1000} height={2000} className="w-full h-full" />
-        {/* 3D BIOMECHANICS OVERLAY - Anchored to Engineering Pillar */}
-          <Biomechanics3D 
-            pose={allLandmarks.pose}
-            face={allLandmarks.face}
-            leftHand={allLandmarks.leftHand}
-            rightHand={allLandmarks.rightHand}
-            zoom={zoom} 
-            skeletonScale={skeletonScale}
-            pan={pan}
-            videoSize={allLandmarks.imageSize}
-          />
       </div>
     </div>
   );

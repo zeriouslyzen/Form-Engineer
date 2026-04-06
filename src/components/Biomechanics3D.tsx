@@ -1,6 +1,6 @@
 import React, { useRef, useMemo } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrthographicCamera, Stars } from '@react-three/drei';
+import { OrthographicCamera, Stars, Html } from '@react-three/drei';
 import * as THREE from 'three';
 
 /**
@@ -14,10 +14,10 @@ interface Biomechanics3DProps {
   leftHand: any[] | null;
   rightHand: any[] | null;
   mirror?: boolean;
-  zoom: number;
   skeletonScale: number;
-  pan: { x: number; y: number };
   videoSize: { width: number; height: number };
+  cropInfo: { sx: number; sy: number; sw: number; sh: number };
+  videoViewport: { width: number; height: number; top: number; left: number };
 }
 
 // Helper: Calculate angle between three points (A-B-C) at point B
@@ -50,49 +50,20 @@ const HAND_CONNECTIONS = [
   [0, 17], [17, 18], [18, 19], [19, 20], // Pinky
 ];
 
-const Skeleton: React.FC<Biomechanics3DProps> = ({ pose, face, leftHand, rightHand, mirror = true, zoom, skeletonScale, pan, videoSize }) => {
+const Skeleton: React.FC<Biomechanics3DProps> = ({ pose, face, leftHand, rightHand, mirror = true, skeletonScale, videoSize, cropInfo, videoViewport }) => {
   const getPos = (l: any) => {
     if (!l) return new THREE.Vector3(0, 0, 0);
     const w = videoSize.width;
     const h = videoSize.height;
-    const baseSW = Math.min(w, h / 2.0);
-    let sw = baseSW / zoom;
-    let sh = (baseSW * 2.0) / zoom;
-
-    const cx = w / 2 + (pan.x * (w / 1000));
-    const cy = h / 2 + (pan.y * (h / 2000));
-
-    let sx = cx - sw / 2;
-    let sy = cy - sh / 2;
-
-    // LETTERBOX LOGIC (Matches HolisticTracker)
-    let dx = 0, dy = 0, dw = 1.0, dh = 1.0; 
-    if (sw > w || sh > h) {
-       const ratioS = sw / sh; // 0.5
-       const ratioI = w / h;   
-       if (ratioS > ratioI) {
-          dw = ratioI / ratioS;
-          dx = (1.0 - dw) / 2;
-          sw = w;
-          sh = w / ratioS;
-          sx = 0;
-          sy = (h - sh) / 2;
-       } else {
-          dh = ratioS / ratioI;
-          dy = (1.0 - dh) / 2;
-          sh = h;
-          sw = h * ratioS;
-          sy = 0;
-          sx = (w - sw) / 2;
-       }
-    }
-
-    const relX = dx + dw * (l.x * w - sx) / sw;
-    const relY = dy + dh * (l.y * h - sy) / sh;
     
+    // MAP LANDMARK TO CROP: (l.x * w - sx) / sw
+    const relX = (l.x * w - cropInfo.sx) / cropInfo.sw;
+    const relY = (l.y * h - cropInfo.sy) / cropInfo.sh;
+    
+    // DIRECT FRUSTUM MAPPING: Map relX (0..1) to -0.5..0.5, relY (0..1) to 0.5..-0.5
+    // The 3D canvas now matches the video aspect ratio perfectly.
     const xBase = mirror ? (0.5 - relX) : (relX - 0.5);
-    const yBase = 1.0 - (relY * 2.0);
-    // STICK PRECISELY: No multiplier on position. 
+    const yBase = 0.5 - relY;
     return new THREE.Vector3(xBase, yBase, -l.z);
   };
 
@@ -119,13 +90,25 @@ const Skeleton: React.FC<Biomechanics3DProps> = ({ pose, face, leftHand, rightHa
       {/* POSE SKELETON */}
       {pose && (
         <group>
-          {/* Joints */}
+          {/* Joints: Full-Body Surgical Grid */}
           {pose.map((l, i) => (
-            l.visibility > 0.5 && (
-              <mesh key={`p-${i}`} position={getPos(l)}>
-                <sphereGeometry args={[0.012 * skeletonScale, 16, 16]} />
-                <meshStandardMaterial color="#10b981" emissive="#10b981" emissiveIntensity={2} />
-              </mesh>
+            l.visibility > 0.4 && (
+              <group key={`p-${i}`} position={getPos(l)}>
+                <mesh>
+                  <sphereGeometry args={[0.0018 * skeletonScale, 16, 16]} />
+                  <meshStandardMaterial 
+                    color="#ffffff" 
+                    emissive="#ffffff" 
+                    emissiveIntensity={3} 
+                    transparent 
+                    opacity={l.visibility} 
+                  />
+                </mesh>
+                {/* MEDICAL PULSE ANIMATION */}
+                {[11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28].includes(i) && (
+                  <PulseJoint color="#ffffff" scale={skeletonScale} />
+                )}
+              </group>
             )
           ))}
           {/* Main Connections with Alignment Coloring */}
@@ -142,11 +125,35 @@ const Skeleton: React.FC<Biomechanics3DProps> = ({ pose, face, leftHand, rightHa
               if ((a === 23 && b === 24)) color = getAlignmentColor(alignments.hips, 6, 1.5).color;
               if ((a === 11 && b === 13) || (a === 13 && b === 15)) color = getAlignmentColor(alignments.lElbow, 25, 8).color;
               if ((a === 12 && b === 14) || (a === 14 && b === 16)) color = getAlignmentColor(alignments.rElbow, 25, 8).color;
-              if (color !== "#10b981") opacity = 0.8;
             }
 
-            return <VectorLine key={`pl-${i}`} start={pA} end={pB} color={color} opacity={opacity} />;
+            return (
+              <group key={`pl-${i}`}>
+                <VectorLine start={pA} end={pB} color={color} opacity={opacity} />
+                {/* QUANT METRICS: Digital protractor for elbows & knees */}
+                {[13, 14, 25, 26].includes(b) && (
+                   <Html center position={pB.clone().add(new THREE.Vector3(0.1, 0.1, 0))}>
+                      <div className="medical-label">
+                         {b === 13 ? alignments?.lElbow.toFixed(1) : 
+                          b === 14 ? alignments?.rElbow.toFixed(1) : 
+                          b === 25 ? "L_KNEE" : "R_KNEE"}
+                         { [13,14].includes(b) ? "°" : "" }
+                      </div>
+                   </Html>
+                )}
+              </group>
+            );
           })}
+
+          {/* NECK MAPPING (Medical Precision) */}
+          {pose[11] && pose[12] && face && face[0] && (
+            <VectorLine 
+              start={new THREE.Vector3().lerpVectors(getPos(pose[11]), getPos(pose[12]), 0.5)} 
+              end={getPos(face[0])} 
+              color="#ffffff" 
+              opacity={0.3} 
+            />
+          )}
         </group>
       )}
 
@@ -155,8 +162,8 @@ const Skeleton: React.FC<Biomechanics3DProps> = ({ pose, face, leftHand, rightHa
         <group key={`h-${hIdx}`}>
           {hand.map((l, i) => (
             <mesh key={`h-${hIdx}-${i}`} position={getPos(l)}>
-              <sphereGeometry args={[0.005 * skeletonScale, 8, 8]} />
-              <meshStandardMaterial color="#00ffff" emissive="#00ffff" emissiveIntensity={3} />
+              <sphereGeometry args={[0.0015 * skeletonScale, 8, 8]} />
+              <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={2} />
             </mesh>
           ))}
           {HAND_CONNECTIONS.map(([a, b], i) => (
@@ -173,10 +180,10 @@ const Skeleton: React.FC<Biomechanics3DProps> = ({ pose, face, leftHand, rightHa
       {/* FACE (Iris Gaze Lasers) */}
       {face && (
         <group>
-          {face.filter((_, i) => i % 20 === 0).map((l, i) => (
+          {face.filter((_, i) => i % 6 === 0).map((l, i) => (
             <mesh key={`f-${i}`} position={getPos(l)}>
-              <sphereGeometry args={[0.003, 4, 4]} />
-              <meshStandardMaterial color="#ffffff" transparent opacity={0.2} />
+              <sphereGeometry args={[0.0018, 4, 4]} />
+              <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={2} transparent opacity={0.6} />
             </mesh>
           ))}
           {[468, 473].map(eyeIdx => {
@@ -216,7 +223,7 @@ const ChakraSystem: React.FC<{ pose: any[] | null, getPos: (l: any) => THREE.Vec
         return (
           <group key={`ch-${i}`}>
             <mesh position={p}>
-              <sphereGeometry args={[0.015 * skeletonScale, 16, 16]} />
+              <sphereGeometry args={[0.0025 * skeletonScale, 16, 16]} />
               <meshStandardMaterial color={spineColor === '#22c55e' ? '#22c55e' : c.color} emissive={spineColor === '#22c55e' ? '#22c55e' : c.color} emissiveIntensity={spineIntensity} />
             </mesh>
             <VectorLine start={p.clone().add(new THREE.Vector3(0,0,0.08))} end={p.clone().add(new THREE.Vector3(0,0,-0.08))} color={spineColor} opacity={0.6} />
@@ -224,6 +231,26 @@ const ChakraSystem: React.FC<{ pose: any[] | null, getPos: (l: any) => THREE.Vec
         );
       })}
     </group>
+  );
+};
+
+const PulseJoint: React.FC<{ color: string, scale: number }> = ({ color, scale }) => {
+  const meshRef = useRef<THREE.Mesh>(null);
+  useFrame(({ clock }) => {
+    if (meshRef.current) {
+      const t = clock.getElapsedTime() % 2;
+      const s = t * 0.05 * scale;
+      meshRef.current.scale.set(s, s, s);
+      const mat = meshRef.current.material as THREE.MeshStandardMaterial;
+      if (mat) mat.opacity = (1 - (t / 2)) * 0.5;
+    }
+  });
+
+  return (
+    <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]}>
+      <ringGeometry args={[0.8, 1, 32]} />
+      <meshStandardMaterial color={color} transparent opacity={0.5} side={THREE.DoubleSide} />
+    </mesh>
   );
 };
 
@@ -263,17 +290,31 @@ const Dantien: React.FC<{ pose: any[] | null, getPos: (l: any) => THREE.Vector3,
   });
   return (
     <mesh ref={meshRef}>
-      <sphereGeometry args={[0.05 * skeletonScale, 32, 32]} />
-      <meshStandardMaterial color="#fbbf24" emissive="#fbbf24" emissiveIntensity={5} transparent opacity={0.2} />
+      <sphereGeometry args={[0.005 * skeletonScale, 32, 32]} />
+      <meshStandardMaterial color="#fbbf24" emissive="#fbbf24" emissiveIntensity={3} transparent opacity={0.6} />
     </mesh>
   );
 };
 
 export const Biomechanics3D: React.FC<Biomechanics3DProps> = (props) => {
   return (
-    <div className="biomechanics-3d-overlay">
+    <div className="biomechanics-3d-overlay" style={{ 
+      width: `${props.videoViewport.width}px`, 
+      height: `${props.videoViewport.height}px`,
+      top: `${props.videoViewport.top}px`,
+      left: `${props.videoViewport.left}px`
+    }}>
       <Canvas gl={{ alpha: true, antialias: true }} dpr={[1, 2]} style={{ width: '100%', height: '100%' }}>
-        <OrthographicCamera makeDefault left={-0.5} right={0.5} top={1.0} bottom={-1.0} near={0.1} far={100} position={[0, 0, 10]} />
+        <OrthographicCamera 
+          makeDefault 
+          left={-0.5} 
+          right={0.5} 
+          top={0.5} 
+          bottom={-0.5} 
+          near={0.1} 
+          far={100} 
+          position={[0, 0, 10]} 
+        />
         <ambientLight intensity={0.5} />
         <pointLight position={[10, 10, 10]} intensity={2} />
         <Stars radius={100} depth={50} count={2000} factor={4} saturation={0} fade speed={0.5} />

@@ -24,6 +24,12 @@ export class AudioCoach {
       "Empty your mind. Be formless, shapeless, like water.",
       "Knowing is not enough, we must apply.",
       "Willing is not enough, we must do."
+    ],
+    CHAKRA_PULSE: [
+      "Now!",
+      "Strike!",
+      "React!",
+      "Go!"
     ]
   };
 
@@ -58,7 +64,7 @@ export class AudioCoach {
     }
   }
 
-  public speak(type: 'PUNCH_START' | 'PUNCH_END' | 'TELEGRAPH' | 'IDLE') {
+  public speak(type: 'PUNCH_START' | 'PUNCH_END' | 'TELEGRAPH' | 'IDLE' | 'CHAKRA_PULSE') {
     if (this.synth.speaking) return;
 
     const options = AudioCoach.QUOTES[type];
