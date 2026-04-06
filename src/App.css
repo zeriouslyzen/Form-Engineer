@@ -170,6 +170,36 @@ canvas {
   margin-top: 20px;
 }
 
+.gesture-toggle {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #10b981;
+  font-family: monospace;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+  cursor: pointer;
+  margin-top: 24px;
+  padding: 6px 16px;
+  transition: all 0.3s ease;
+  z-index: 10;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+.gesture-toggle.disabled {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.3);
+  text-shadow: 0 0 10px rgba(239, 68, 68, 0.2);
+}
+
+.gesture-toggle:hover {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: #10b981;
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.2);
+  transform: translateY(-1px);
+}
+
 @keyframes pulse {
   0% { transform: scale(1); opacity: 0.8; }
   100% { transform: scale(2.5); opacity: 0; }

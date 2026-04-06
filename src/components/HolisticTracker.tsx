@@ -43,7 +43,8 @@ export const HolisticTracker: React.FC = () => {
   // Focus & Pan States
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1.0);
-  const [skeletonScale, setSkeletonScale] = useState(1.0); // Separated Control
+  const [skeletonScale, setSkeletonScale] = useState(1.0); 
+  const [gesturesEnabled, setGesturesEnabled] = useState(true); // Gesture Toggle
   const zoomRef = useRef(1.0);
   const panRef = useRef({ x: 0, y: 0 });
   const videoTrackRef = useRef<MediaStreamTrack | null>(null);
@@ -115,6 +116,12 @@ export const HolisticTracker: React.FC = () => {
       }
     };
     getDevices();
+
+    // Hot-plugging discovery for Samsung/Android USB cameras
+    navigator.mediaDevices.ondevicechange = () => {
+      console.log("JKD: Hardware change detected. Refreshing optical sources...");
+      getDevices();
+    };
   }, []);
 
   useEffect(() => {
@@ -168,18 +175,22 @@ export const HolisticTracker: React.FC = () => {
           if (!results.image) return;
           if (!streamStarted) setStreamStarted(true);
 
-          // Handle Gesture Recognition
-          const leftHandGesture = logic.detectHandGesture(results.leftHandLandmarks);
-          const rightHandGesture = logic.detectHandGesture(results.rightHandLandmarks);
-          const gesture = leftHandGesture || rightHandGesture;
+          if (gesturesEnabled) {
+            // Handle Gesture Recognition
+            const leftHandGesture = logic.detectHandGesture(results.leftHandLandmarks);
+            const rightHandGesture = logic.detectHandGesture(results.rightHandLandmarks);
+            const gesture = leftHandGesture || rightHandGesture;
 
-          if (gesture === 'FIVE') zoomVelocity = 0.02; // Slower, smoother zoom
-          else if (gesture === 'THUMBS_DOWN') zoomVelocity = -0.02;
-          else zoomVelocity = 0; // Default to stop if no command gesture is visible
+            if (gesture === 'FIVE') zoomVelocity = 0.02; // Slower, smoother zoom
+            else if (gesture === 'THUMBS_DOWN') zoomVelocity = -0.02;
+            else zoomVelocity = 0; // Default to stop if no command gesture is visible
 
-          // Independent Skeleton Scale Gestures
-          if (gesture === 'ONE') setSkeletonScale(prev => Math.min(3, prev + 0.02));
-          else if (gesture === 'TWO') setSkeletonScale(prev => Math.max(0.2, prev - 0.02));
+            // Independent Skeleton Scale Gestures
+            if (gesture === 'ONE') setSkeletonScale(prev => Math.min(3, prev + 0.02));
+            else if (gesture === 'TWO') setSkeletonScale(prev => Math.max(0.2, prev - 0.02));
+          } else {
+            zoomVelocity = 0;
+          }
 
           if (zoomVelocity !== 0) {
             const nextZoom = Math.max(1, Math.min(5, zoomRef.current + zoomVelocity));
@@ -357,11 +368,17 @@ export const HolisticTracker: React.FC = () => {
     >
       <video ref={videoRef} className="hidden" muted playsInline autoPlay />
       
-      {/* AI PULSE */}
+      {/* AI PULSE / GESTURE HUD */}
       <div className={`ai-pulse ${isAiThinking ? 'thinking' : ''}`}>
         <div className="pulse-ring"></div>
         <div className="pulse-core"></div>
-        <span className="ai-label">{isAiThinking ? 'THINKING' : 'LISTENING'}</span>
+        <button 
+           className={`gesture-toggle ${gesturesEnabled ? 'enabled' : 'disabled'}`}
+           onClick={() => setGesturesEnabled(!gesturesEnabled)}
+           title="Toggle Gesture Control"
+        >
+          {gesturesEnabled ? 'GESTURES: ON' : 'GESTURES: OFF'}
+        </button>
       </div>
 
       {/* ZOOM & SIZE CONTROLS */}
