@@ -92,4 +92,51 @@ export class JKDLogic {
 
     return result;
   }
+
+  /**
+   * Recognizes hand gestures for camera control.
+   * Returns: 'FIVE' (Zoom In), 'FIST' (Stop), 'THUMBS_DOWN' (Zoom Out), or null.
+   */
+  public detectHandGesture(handLandmarks: any[]): 'FIVE' | 'FIST' | 'THUMBS_DOWN' | null {
+    if (!handLandmarks || handLandmarks.length < 21) return null;
+
+    // Helper: Is finger extended?
+    const isExtended = (tipIdx: number, pipIdx: number) => {
+      // In normalized coordinates, Y decreases upwards. 
+      // For a standard vertical hand, TIP.y < PIP.y means extended.
+      // But we can use distance from wrist for more robustness.
+      const wrist = handLandmarks[0];
+      const tip = handLandmarks[tipIdx];
+      const pip = handLandmarks[pipIdx];
+      
+      const distTip = Math.sqrt(Math.pow(tip.x - wrist.x, 2) + Math.pow(tip.y - wrist.y, 2));
+      const distPip = Math.sqrt(Math.pow(pip.x - wrist.x, 2) + Math.pow(pip.y - wrist.y, 2));
+      return distTip > distPip * 1.2; // 20% further means extended
+    };
+
+    const fingersExtended = [
+      isExtended(8, 6),  // Index
+      isExtended(12, 10), // Middle
+      isExtended(16, 14), // Ring
+      isExtended(20, 18)  // Pinky
+    ];
+
+    const extendedCount = fingersExtended.filter(v => v).length;
+
+    // 1. FIVE (Open Palm): Most fingers extended
+    if (extendedCount >= 3) return 'FIVE';
+
+    // 2. THUMBS DOWN: 
+    // Hand is mostly closed (low extended count) AND thumb tip is below thumb base (higher Y)
+    const thumbTip = handLandmarks[4];
+    const thumbBase = handLandmarks[2];
+    const isThumbDown = thumbTip.y > thumbBase.y + 0.05; // Significant Y difference
+
+    if (extendedCount <= 1 && isThumbDown) return 'THUMBS_DOWN';
+
+    // 3. FIST: All fingers closed
+    if (extendedCount === 0) return 'FIST';
+
+    return null;
+  }
 }

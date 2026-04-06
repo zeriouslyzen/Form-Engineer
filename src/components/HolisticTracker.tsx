@@ -43,6 +43,7 @@ export const HolisticTracker: React.FC = () => {
   // Focus & Pan States
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1.0);
+  const [skeletonScale, setSkeletonScale] = useState(1.0); // Separated Control
   const zoomRef = useRef(1.0);
   const panRef = useRef({ x: 0, y: 0 });
   const videoTrackRef = useRef<MediaStreamTrack | null>(null);
@@ -147,9 +148,44 @@ export const HolisticTracker: React.FC = () => {
           refineFaceLandmarks: true,
         });
 
+        console.log("JKD: REQUESTING CAMERA...");
+        const constraints: MediaStreamConstraints = {
+          video: selectedDeviceId 
+            ? { deviceId: { exact: selectedDeviceId }, width: { ideal: 720 }, height: { ideal: 1280 } }
+            : { width: { ideal: 720 }, height: { ideal: 1280 } },
+          audio: false
+        };
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        const videoTrack = stream.getVideoTracks()[0];
+        videoTrackRef.current = videoTrack;
+        
+        // Initial hardware zoom check/apply
+        applyHardwareZoom(zoomRef.current);
+
+        let zoomVelocity = 0; // Local velocity for gesture interpolation
+
         holistic.onResults((results: any) => {
           if (!results.image) return;
           if (!streamStarted) setStreamStarted(true);
+
+          // Handle Gesture Recognition
+          const leftHandGesture = logic.detectHandGesture(results.leftHandLandmarks);
+          const rightHandGesture = logic.detectHandGesture(results.rightHandLandmarks);
+          const gesture = leftHandGesture || rightHandGesture;
+
+          if (gesture === 'FIVE') zoomVelocity = 0.05;
+          else if (gesture === 'THUMBS_DOWN') zoomVelocity = -0.05;
+          else if (gesture === 'FIST') zoomVelocity = 0;
+
+          if (zoomVelocity !== 0) {
+            const nextZoom = Math.max(1, Math.min(5, zoomRef.current + zoomVelocity));
+            if (nextZoom !== zoomRef.current) {
+               zoomRef.current = nextZoom;
+               setZoom(nextZoom);
+               applyHardwareZoom(nextZoom);
+            }
+          }
+
           setAllLandmarks({
             pose: results.poseLandmarks || null,
             face: results.faceLandmarks || null,
@@ -160,20 +196,6 @@ export const HolisticTracker: React.FC = () => {
           renderDualScreens(results);
         });
 
-        console.log("JKD: REQUESTING CAMERA...");
-        const constraints: MediaStreamConstraints = {
-          video: selectedDeviceId 
-            ? { deviceId: { exact: selectedDeviceId }, width: { ideal: 720 }, height: { ideal: 1280 } }
-            : { width: { ideal: 720 }, height: { ideal: 1280 } },
-          audio: false
-        };
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
-        const track = stream.getVideoTracks()[0];
-        videoTrackRef.current = track;
-        
-        // Initial hardware zoom check/apply
-        applyHardwareZoom(zoomRef.current);
-        
         const processFrame = async () => {
            if (videoRef.current && holistic && !videoRef.current.paused) {
               await holistic.send({ image: videoRef.current });
@@ -338,9 +360,9 @@ export const HolisticTracker: React.FC = () => {
         <span className="ai-label">{isAiThinking ? 'THINKING' : 'LISTENING'}</span>
       </div>
 
-      {/* ZOOM KNOB */}
+      {/* ZOOM & SIZE CONTROLS */}
       <div className="zoom-knob-container">
-        <label htmlFor="zoom-slider" className="sr-only">Zoom Level</label>
+        <label htmlFor="zoom-slider">Cam Zoom</label>
         <input 
           id="zoom-slider"
           type="range" 
@@ -348,11 +370,25 @@ export const HolisticTracker: React.FC = () => {
           max="5" 
           step="0.1" 
           value={zoom} 
-          title="Zoom"
+          title="Camera Zoom"
           onChange={(e) => handleZoomChange(parseFloat(e.target.value))}
           className="zoom-knob-input"
         />
-        <span className="text-emerald-500 font-mono text-[10px] mt-1">{zoom.toFixed(1)}x</span>
+        <span className="text-emerald-500 font-mono text-[10px] mt-1 mb-4">{zoom.toFixed(1)}x</span>
+        
+        <label htmlFor="size-slider">Skeleton</label>
+        <input 
+          id="size-slider"
+          type="range" 
+          min="0.2" 
+          max="3" 
+          step="0.1" 
+          value={skeletonScale} 
+          title="Graphic Size"
+          onChange={(e) => setSkeletonScale(parseFloat(e.target.value))}
+          className="zoom-knob-input"
+        />
+        <span className="text-cyan-400 font-mono text-[10px] mt-1">{skeletonScale.toFixed(1)}x</span>
       </div>
 
       {!streamStarted && (
@@ -375,6 +411,7 @@ export const HolisticTracker: React.FC = () => {
             leftHand={allLandmarks.leftHand}
             rightHand={allLandmarks.rightHand}
             zoom={zoom} 
+            skeletonScale={skeletonScale}
             pan={pan}
             videoSize={allLandmarks.imageSize}
           />

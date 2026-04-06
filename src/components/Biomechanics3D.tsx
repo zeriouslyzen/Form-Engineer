@@ -15,6 +15,7 @@ interface Biomechanics3DProps {
   rightHand: any[] | null;
   mirror?: boolean;
   zoom: number;
+  skeletonScale: number;
   pan: { x: number; y: number };
   videoSize: { width: number; height: number };
 }
@@ -49,7 +50,7 @@ const HAND_CONNECTIONS = [
   [0, 17], [17, 18], [18, 19], [19, 20], // Pinky
 ];
 
-const Skeleton: React.FC<Biomechanics3DProps> = ({ pose, face, leftHand, rightHand, mirror = true, zoom, pan, videoSize }) => {
+const Skeleton: React.FC<Biomechanics3DProps> = ({ pose, face, leftHand, rightHand, mirror = true, zoom, skeletonScale, pan, videoSize }) => {
   const getPos = (l: any) => {
     if (!l) return new THREE.Vector3(0, 0, 0);
     const w = videoSize.width;
@@ -65,7 +66,7 @@ const Skeleton: React.FC<Biomechanics3DProps> = ({ pose, face, leftHand, rightHa
     const relY = (l.y * h - sy) / sh;
     const xBase = mirror ? (0.5 - relX) : (relX - 0.5);
     const yBase = 1.0 - (relY * 2.0);
-    return new THREE.Vector3(xBase, yBase, -l.z);
+    return new THREE.Vector3(xBase * skeletonScale, yBase * skeletonScale, -l.z * skeletonScale);
   };
 
   // 1. Calculate Core Alignments for whole-skeleton coloring
