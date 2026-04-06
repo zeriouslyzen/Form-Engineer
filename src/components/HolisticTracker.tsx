@@ -183,42 +183,47 @@ export const HolisticTracker: React.FC = () => {
   const renderDualScreens = (results: any) => {
     const rawCtx = canvasRawRef.current?.getContext('2d');
     const engCtx = canvasEngRef.current?.getContext('2d');
-    if (!rawCtx || !engCtx) return;
+    
+    // We handle individual contexts so mobile (where raw is hidden) still works
+    if (rawCtx) {
+      drawToCanvas(rawCtx, canvasRawRef.current!, results, 0);
+    }
+    if (engCtx) {
+      drawToCanvas(engCtx, canvasEngRef.current!, results, 1);
+    }
+  };
 
-    [rawCtx, engCtx].forEach((ctx, i) => {
-      const canvas = i === 0 ? canvasRawRef.current! : canvasEngRef.current!;
-      ctx.save();
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      
-      const w = results.image.width;
-      const h = results.image.height;
-      const baseSW = Math.min(w, h / 2.0);
-      const sw = baseSW / zoom;
-      const sh = (baseSW * 2.0) / zoom;
+  const drawToCanvas = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, results: any, index: number) => {
+    ctx.save();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    const w = results.image.width;
+    const h = results.image.height;
+    
+    // Maintain the 1:2 source window for consistency across desktop and mobile
+    const baseSW = Math.min(w, h / 2.0);
+    const sw = baseSW / zoom;
+    const sh = (baseSW * 2.0) / zoom;
 
-      // Map screen-pan (0-1000) to SOURCE pixels
-      const cx = w / 2 + (pan.x * (w / 1000));
-      const cy = h / 2 + (pan.y * (h / 2000));
+    const cx = w / 2 + (pan.x * (w / 1000));
+    const cy = h / 2 + (pan.y * (h / 2000));
 
-      const sx = cx - sw / 2;
-      const sy = cy - sh / 2;
+    const sx = cx - sw / 2;
+    const sy = cy - sh / 2;
 
-      ctx.translate(canvas.width, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(results.image, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-      
-      if (i === 1) {
-        if (results.poseLandmarks) {
-          const analysis = logic.analyze(results.poseLandmarks);
-          if (analysis.event === 'PUNCH_END') setStats(prev => ({ ...prev, punches: prev.punches + 1 }));
-          if (analysis.event === 'TELEGRAPH') {
-            setStats(prev => ({ ...prev, telegraphs: prev.telegraphs + 1 }));
-            coach.speak('TELEGRAPH');
-          }
-        }
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(results.image, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    
+    if (index === 1 && results.poseLandmarks) {
+      const analysis = logic.analyze(results.poseLandmarks);
+      if (analysis.event === 'PUNCH_END') setStats(prev => ({ ...prev, punches: prev.punches + 1 }));
+      if (analysis.event === 'TELEGRAPH') {
+        setStats(prev => ({ ...prev, telegraphs: prev.telegraphs + 1 }));
+        coach.speak('TELEGRAPH');
       }
-      ctx.restore();
-    });
+    }
+    ctx.restore();
   };
 
   if (!active) {
@@ -315,10 +320,10 @@ export const HolisticTracker: React.FC = () => {
 
       {/* HUD ELEMENTS */}
 
-      <div className="iphone-pillar">
+      <div className="iphone-pillar desktop-only">
         <canvas ref={canvasRawRef} width={1000} height={2000} className="w-full h-full" />
       </div>
-      <div className="iphone-pillar">
+      <div className="iphone-pillar full-mobile">
         <canvas ref={canvasEngRef} width={1000} height={2000} className="w-full h-full" />
         {/* 3D BIOMECHANICS OVERLAY - Anchored to Engineering Pillar */}
           <Biomechanics3D 
