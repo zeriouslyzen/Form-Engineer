@@ -31,9 +31,6 @@ body {
   background: #000;
   overflow: hidden;
   position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .iphone-pillar canvas {
