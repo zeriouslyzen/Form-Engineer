@@ -2,89 +2,119 @@
   background-color: #000;
   margin: 0;
   padding: 0;
-  color-scheme: dark;
-}
-
-html, body, #root {
-  margin: 0;
-  padding: 0;
-  width: 100vw;
-  height: 100vh;
-  height: -webkit-fill-available;
-  overflow: hidden;
-  background: #000;
-  font-family: 'Inter', monospace;
 }
 
 body {
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  margin: 0;
+  background: #000;
+  overflow: hidden;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
 }
 
 .dojo-container {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  background: #000;
+  width: 100vw;
+  height: 100vh;
   display: flex;
+  flex-direction: row;
+  background: #000;
+  margin: 0;
+  padding: 0;
+}
+
+.iphone-pillar {
+  width: 50vw;
+  height: 100vh;
+  background: #000;
   overflow: hidden;
+  position: relative;
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
 }
 
-/* DESKTOP: Side-by-Side */
-@media (min-width: 769px) {
-  .dojo-container {
-    flex-direction: row;
-  }
-  .iphone-pillar {
-    width: 50vw;
-    height: 100%;
-    position: relative;
-    border-right: 1px solid rgba(16, 185, 129, 0.1);
-  }
-}
-
-/* MOBILE: Full Screen Overlay */
-@media (max-width: 768px) {
-  .dojo-container {
-    flex-direction: column;
-  }
-  .iphone-pillar {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-  }
-  /* Engineering pillar sits on top of raw pillar */
-  .iphone-pillar:nth-child(2) {
-    background: transparent;
-    z-index: 10;
-  }
-  .iphone-pillar:nth-child(2) canvas {
-    opacity: 0.8; /* Subtle transparency for comparison */
-  }
-}
-
-.iphone-pillar canvas {
+canvas {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.biomechanics-3d-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 20;
-  pointer-events: none;
+.mirror {
+  transform: scaleX(-1);
 }
 
-/* UI ELEMENTS */
-.ai-pulse {
+.hidden {
+  display: none !important;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+.zoom-knob-container {
   position: fixed;
-  top: max(32px, env(safe-area-inset-top));
   right: 32px;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   flex-direction: column;
   align-items: center;
   z-index: 1000;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 20px 10px;
+  border-radius: 40px;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+.zoom-knob-input {
+  writing-mode: bt-lr; /* Vertical slider */
+  appearance: slider-vertical;
+  width: 8px;
+  height: 300px;
+  accent-color: #10b981;
+  cursor: pointer;
+}
+
+.zoom-knob-container label {
+  color: #10b981;
+  font-family: monospace;
+  font-size: 10px;
+  margin-bottom: 12px;
+  letter-spacing: 0.2em;
+}
+
+/* AI PULSE */
+.ai-pulse {
+  position: fixed;
+  top: 32px;
+  right: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 1001;
+}
+
+.pulse-ring {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(16, 185, 129, 0.2);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  position: absolute;
+  animation: pulse 2s infinite ease-out;
 }
 
 .pulse-core {
@@ -93,6 +123,8 @@ body {
   border-radius: 50%;
   background: #10b981;
   box-shadow: 0 0 20px #10b981;
+  position: relative;
+  z-index: 2;
   transition: all 0.3s ease;
 }
 
@@ -102,44 +134,35 @@ body {
   transform: scale(1.5);
 }
 
+.ai-pulse.thinking .pulse-ring {
+  border-color: #00ffff;
+  background: rgba(0, 255, 255, 0.1);
+  animation-duration: 0.5s;
+}
+
 .ai-label {
   color: #10b981;
   font-family: monospace;
   font-size: 10px;
   font-weight: 900;
   letter-spacing: 0.4em;
-  margin-top: 12px;
-  opacity: 0.8;
+  text-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+  margin-top: 20px;
 }
 
-.zoom-knob-container {
-  position: fixed;
-  right: 16px;
-  bottom: max(32px, env(safe-area-inset-bottom));
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  z-index: 1000;
-  background: rgba(0, 0, 0, 0.4);
-  padding: 16px 8px;
-  border-radius: 30px;
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid rgba(16, 185, 129, 0.2);
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 0.8; }
+  100% { transform: scale(2.5); opacity: 0; }
 }
 
-.zoom-knob-input {
-  appearance: slider-vertical;
-  width: 4px;
-  height: 120px;
-  accent-color: #10b981;
+/* 3D OVERLAY */
+canvas {
+  pointer-events: none;
 }
 
-.hidden { display: none !important; }
-
-@keyframes scan {
-  0% { top: 0; opacity: 0; }
-  20% { opacity: 1; }
-  80% { opacity: 1; }
-  100% { top: 100%; opacity: 0; }
+.biomechanics-3d-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
 }
