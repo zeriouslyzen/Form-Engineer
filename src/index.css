@@ -6,6 +6,9 @@
   color-scheme: dark;
   color: rgba(255, 255, 255, 0.87);
   background-color: #000000;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(16, 185, 129, 0.2);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;

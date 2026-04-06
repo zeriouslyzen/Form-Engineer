@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { JKDLogic } from '../lib/JKDLogic';
 import { AudioCoach } from '../lib/AudioService';
-import { VoiceAI } from '../lib/VoiceAI';
 import { Biomechanics3D } from './Biomechanics3D';
 import { OneEuroFilter } from '../lib/Filters';
 
@@ -25,13 +24,11 @@ export const HolisticTracker: React.FC = () => {
   
   // Registration & Precision State
   const [isRegistering, setIsRegistering] = useState(false);
+  const isRegisteringRef = useRef(false);
   const [registrationProgress, setRegistrationProgress] = useState(0);
   const filters = useRef<Map<string, OneEuroFilter>>(new Map());
 
-  // AI State
-  const [voice] = useState(() => new VoiceAI((cmd) => handleVoiceCommand(cmd)));
-  const [isAiThinking, setIsAiThinking] = useState(false);
-  const [stats, setStats] = useState({ punches: 0, telegraphs: 0 });
+  // Training State
   const [allLandmarks, setAllLandmarks] = useState<{
     pose: any[] | null, 
     face: any[] | null, 
@@ -65,13 +62,6 @@ export const HolisticTracker: React.FC = () => {
   const handleMouseUp = () => { isDragging.current = false; };
   const handleDoubleClick = () => { setPan({ x: 0, y: 0 }); setZoom(1.1); };
   const handleWheel = (e: React.WheelEvent) => setZoom(prev => Math.max(1, Math.min(5, prev - e.deltaY * 0.002)));
-
-  const handleVoiceCommand = async (command: string) => {
-    setIsAiThinking(true);
-    const response = await voice.chat(command, stats);
-    setIsAiThinking(false);
-    coach.feedback(response);
-  };
 
   useEffect(() => {
     const getDevices = async () => {
@@ -120,21 +110,22 @@ export const HolisticTracker: React.FC = () => {
           refineFaceLandmarks: true,
         });
 
-        holistic.onResults((results: any) => {
-          if (!results.image) return;
-          if (!streamStarted) setStreamStarted(true);
+          holistic.onResults((results: any) => {
+            if (!results.image) return;
+            if (!streamStarted) setStreamStarted(true);
 
-          if (isRegistering) {
-            const complete = logic.registerBody(results.poseLandmarks);
-            setRegistrationProgress(prev => Math.min(100, prev + 1));
-            if (complete) {
-              setIsRegistering(false);
-              coach.feedback("Body metrics registered. Surgical precision engaged.");
+            if (isRegisteringRef.current) {
+              const complete = logic.registerBody(results.poseLandmarks);
+              if (complete) {
+                isRegisteringRef.current = false;
+                setIsRegistering(false);
+                coach.feedback("Precision Engaged.");
+              }
+              setRegistrationProgress(prev => (prev < 100 ? prev + 1 : prev));
             }
-          }
 
-          // Apply Predictive Filters for Surgical Precision
-          const filteredPose = results.poseLandmarks?.map((lm: any, i: number) => {
+            // Apply Predictive Filters for Surgical Precision
+            const filteredPose = results.poseLandmarks?.map((lm: any, i: number) => {
             const fx = getFilter(`p${i}x`).filter(lm.x);
             const fy = getFilter(`p${i}y`).filter(lm.y);
             const fz = getFilter(`p${i}z`).filter(lm.z);
@@ -180,29 +171,15 @@ export const HolisticTracker: React.FC = () => {
       }
     };
 
-    init();
+      init();
 
-    voice.start();
-
-    // Proactive Feedback Loop
-    const proactiveInterval = setInterval(async () => {
-      if (stats.punches > 0 || stats.telegraphs > 0) {
-        setIsAiThinking(true);
-        const response = await voice.chat("Give me a one-sentence tip based on my current stats.", stats);
-        setIsAiThinking(false);
-        coach.feedback(response);
-      }
-    }, 45000); // Every 45 seconds
-
-    return () => {
-      console.log("JKD: CLEANING UP...");
-      voice.stop();
-      clearInterval(proactiveInterval);
-      cancelAnimationFrame(animationFrameId);
-      if (stream) stream.getTracks().forEach(t => t.stop());
-      if (holistic) holistic.close();
-    };
-  }, [active, isRegistering]); // Re-bind if registration state changes
+      return () => {
+        console.log("JKD: CLEANING UP...");
+        cancelAnimationFrame(animationFrameId);
+        if (stream) stream.getTracks().forEach(t => t.stop());
+        if (holistic) holistic.close();
+      };
+    }, [active, selectedDeviceId]); // ONLY restart on device or active change
 
   const getFilter = (id: string) => {
     if (!filters.current.has(id)) {
@@ -241,9 +218,7 @@ export const HolisticTracker: React.FC = () => {
       if (i === 1) {
         if (results.poseLandmarks) {
           const analysis = logic.analyze(results.poseLandmarks);
-          if (analysis.event === 'PUNCH_END') setStats(prev => ({ ...prev, punches: prev.punches + 1 }));
           if (analysis.event === 'TELEGRAPH') {
-            setStats(prev => ({ ...prev, telegraphs: prev.telegraphs + 1 }));
             coach.speak('TELEGRAPH');
           }
         }
@@ -274,6 +249,7 @@ export const HolisticTracker: React.FC = () => {
             onClick={() => {
               setActive(true);
               setIsRegistering(true);
+              isRegisteringRef.current = true;
               setRegistrationProgress(0);
             }}
             className="group relative px-16 py-10 bg-transparent border border-[#10b981]/50 overflow-hidden transition-all hover:bg-[#10b981]/20"
@@ -323,10 +299,10 @@ export const HolisticTracker: React.FC = () => {
     >
       <video ref={videoRef} className="hidden" muted playsInline autoPlay />
       
-      {/* AI PULSE */}
-      <div className={`ai-pulse ${isAiThinking ? 'thinking' : ''}`}>
+      {/* AI STATUS PULSE - MODIFIED (NO VOICE) */}
+      <div className="ai-pulse">
         <div className="pulse-core"></div>
-        <span className="ai-label">{isAiThinking ? 'THINKING' : 'LISTENING'}</span>
+        <span className="ai-label">ACTIVE</span>
       </div>
       
       {/* REGISTRATION HUD */}
