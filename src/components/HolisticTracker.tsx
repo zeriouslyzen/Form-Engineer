@@ -285,51 +285,46 @@ export const HolisticTracker: React.FC = () => {
       
       {/* AI PULSE */}
       <div className={`ai-pulse ${isAiThinking ? 'thinking' : ''}`}>
-        <div className="pulse-ring"></div>
         <div className="pulse-core"></div>
         <span className="ai-label">{isAiThinking ? 'THINKING' : 'LISTENING'}</span>
+      </div>
+      
+      {!streamStarted && (
+        <div className="fixed inset-0 bg-black flex items-center justify-center z-[1000]">
+          <div className="text-[#10b981] font-mono text-sm animate-pulse tracking-[1em] uppercase">Waking Optics...</div>
+        </div>
+      )}
+
+      {/* PILLAR 1: RAW FEED */}
+      <div className="iphone-pillar">
+        <canvas ref={canvasRawRef} width={1000} height={2000} className="mirror" />
+      </div>
+
+      {/* PILLAR 2: ENGINEERING FEED + 3D OVERLAY */}
+      <div className="iphone-pillar">
+        <canvas ref={canvasEngRef} width={1000} height={2000} className="mirror" />
+        <Biomechanics3D 
+          pose={allLandmarks.pose}
+          face={allLandmarks.face}
+          leftHand={allLandmarks.leftHand}
+          rightHand={allLandmarks.rightHand}
+          zoom={zoom} 
+          pan={pan}
+          videoSize={allLandmarks.imageSize}
+        />
       </div>
 
       {/* ZOOM KNOB */}
       <div className="zoom-knob-container">
-        <label htmlFor="zoom-slider" className="sr-only">Zoom Level</label>
         <input 
           id="zoom-slider"
-          type="range" 
-          min="1" 
-          max="5" 
-          step="0.1" 
+          type="range" min="1" max="5" step="0.1" 
           value={zoom} 
           title="Zoom"
           onChange={(e) => setZoom(parseFloat(e.target.value))}
           className="zoom-knob-input"
         />
-        <span className="text-emerald-500 font-mono text-[10px] mt-1">{zoom.toFixed(1)}x</span>
-      </div>
-
-      {!streamStarted && (
-        <div className="fixed inset-0 bg-black flex items-center justify-center z-50">
-          <div className="text-emerald-500 font-mono text-lg animate-pulse tracking-widest">WAKING OPTICS...</div>
-        </div>
-      )}
-
-      {/* HUD ELEMENTS */}
-
-      <div className="iphone-pillar">
-        <canvas ref={canvasRawRef} width={1000} height={2000} className="w-full h-full" />
-      </div>
-      <div className="iphone-pillar">
-        <canvas ref={canvasEngRef} width={1000} height={2000} className="w-full h-full" />
-        {/* 3D BIOMECHANICS OVERLAY - Anchored to Engineering Pillar */}
-          <Biomechanics3D 
-            pose={allLandmarks.pose}
-            face={allLandmarks.face}
-            leftHand={allLandmarks.leftHand}
-            rightHand={allLandmarks.rightHand}
-            zoom={zoom} 
-            pan={pan}
-            videoSize={allLandmarks.imageSize}
-          />
+        <span className="text-[#10b981]/60 font-mono text-[9px] mt-2">{zoom.toFixed(1)}x</span>
       </div>
     </div>
   );
