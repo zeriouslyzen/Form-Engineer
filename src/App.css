@@ -16,7 +16,6 @@ body {
 .dojo-container {
   width: 100vw;
   height: 100vh;
-  height: 100svh;
   display: flex;
   flex-direction: row;
   background: #000;
@@ -27,16 +26,18 @@ body {
 .iphone-pillar {
   width: 100vw;
   height: 100vh;
-  height: 100svh;
   background: #000;
   overflow: hidden;
   position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .iphone-pillar canvas {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 @media (max-width: 768px) {
@@ -244,7 +245,7 @@ canvas {
 
 .biomechanics-3d-overlay {
   position: absolute;
-  z-index: 20;
+  z-index: 5;
   pointer-events: none;
 }
 

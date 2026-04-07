@@ -1,11 +1,12 @@
-import React, { useRef, useMemo } from 'react';
+import React, { useRef, useMemo, useCallback } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrthographicCamera, Stars, Html } from '@react-three/drei';
+import { OrthographicCamera, Html } from '@react-three/drei';
 import * as THREE from 'three';
 
 /**
- * BIOMECHANICS 3D ENGINE - CHI GONG EDITION (RESTORED)
- * Full skeletal tracking with integrated alignment-color logic.
+ * BIOMECHANICS 3D ENGINE - PHYSICAL THERAPY EDITION (V4.0)
+ * Performance-optimized: single animation loop, memoized geometry, no Star field.
+ * Joint angle readouts for clinical-grade PT analysis.
  */
 
 interface Biomechanics3DProps {
@@ -20,307 +21,252 @@ interface Biomechanics3DProps {
   videoViewport: { width: number; height: number; top: number; left: number };
 }
 
-// Helper: Calculate angle between three points (A-B-C) at point B
 const getAngle = (pA: THREE.Vector3, pB: THREE.Vector3, pC: THREE.Vector3) => {
   const v1 = new THREE.Vector3().subVectors(pA, pB).normalize();
   const v2 = new THREE.Vector3().subVectors(pC, pB).normalize();
   return (v1.angleTo(v2) * 180) / Math.PI;
 };
 
-// Helper: Map error to Red -> Orange -> Neon Green
 const getAlignmentColor = (error: number, thresholdGood: number, thresholdPerfect: number) => {
-  if (error < thresholdPerfect) return { color: '#22c55e', intensity: 8 }; // Neon Green
-  if (error < thresholdGood) return { color: '#eab308', intensity: 3 };    // Orange/Yellow
-  return { color: '#ef4444', intensity: 0.8 };                            // Red
+  if (error < thresholdPerfect) return '#22c55e'; // Green = good
+  if (error < thresholdGood)   return '#eab308'; // Yellow = warning
+  return '#ef4444';                              // Red = fix needed
 };
 
-// FULL POSE SKELETON CONNECTIONS
-const POSE_CONNECTIONS = [
+// PT-relevant connections: full body, no fluff
+const POSE_CONNECTIONS: [number, number][] = [
   [11, 12], [11, 13], [13, 15], [12, 14], [14, 16], // Arms
-  [11, 23], [12, 24], [23, 24],                     // Torso/Hips
-  [23, 25], [24, 26], [25, 27], [26, 28],           // Legs
-  [27, 29], [28, 30], [27, 31], [28, 32]            // Feet
+  [11, 23], [12, 24], [23, 24],                      // Torso/Hips
+  [23, 25], [24, 26], [25, 27], [26, 28],            // Legs
+  [27, 29], [28, 30], [27, 31], [28, 32],            // Feet
 ];
 
-const HAND_CONNECTIONS = [
-  [0, 1], [1, 2], [2, 3], [3, 4], // Thumb
-  [0, 5], [5, 6], [6, 7], [7, 8], // Index
-  [0, 9], [9, 10], [10, 11], [11, 12], // Middle
-  [0, 13], [13, 14], [14, 15], [15, 16], // Ring
-  [0, 17], [17, 18], [18, 19], [19, 20], // Pinky
+const HAND_CONNECTIONS: [number, number][] = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [0,9],[9,10],[10,11],[11,12],
+  [0,13],[13,14],[14,15],[15,16],
+  [0,17],[17,18],[18,19],[19,20],
 ];
 
+// Reusable geometry singletons — created once, shared everywhere
+const JOINT_GEO   = new THREE.SphereGeometry(0.003, 8, 8);
+const HAND_GEO    = new THREE.SphereGeometry(0.002, 6, 6);
+const DANTIEN_GEO = new THREE.SphereGeometry(0.008, 16, 16);
+
+// ─── VectorLine: memoized buffer, no per-frame allocation ───────────────────
+const VectorLine: React.FC<{ start: THREE.Vector3; end: THREE.Vector3; color: string; opacity?: number }> =
+  React.memo(({ start, end, color, opacity = 0.5 }) => {
+    const geoRef = useRef<THREE.BufferGeometry>(null);
+
+    useMemo(() => {
+      if (geoRef.current) {
+        const pos = geoRef.current.attributes.position as THREE.BufferAttribute;
+        pos.setXYZ(0, start.x, start.y, start.z);
+        pos.setXYZ(1, end.x, end.y, end.z);
+        pos.needsUpdate = true;
+      }
+    }, [start, end]);
+
+    const positions = useMemo(() =>
+      new Float32Array([start.x, start.y, start.z, end.x, end.y, end.z]),
+    []);
+
+    return (
+      <line>
+        <bufferGeometry ref={geoRef}>
+          <bufferAttribute attach="attributes-position" args={[positions, 3]} />
+        </bufferGeometry>
+        <lineBasicMaterial color={color} transparent opacity={opacity} />
+      </line>
+    );
+  });
+
+// ─── Animated Dantien (single useFrame for whole scene) ─────────────────────
+const AnimatedScene: React.FC<{ dantienPos: THREE.Vector3 | null; skeletonScale: number }> = ({ dantienPos, skeletonScale }) => {
+  const dantienRef = useRef<THREE.Mesh>(null);
+
+  useFrame(({ clock }) => {
+    if (dantienRef.current && dantienPos) {
+      const pulse = Math.sin(clock.elapsedTime * 3) * 0.12 + 1.0;
+      dantienRef.current.scale.setScalar(pulse);
+      dantienRef.current.position.copy(dantienPos);
+      dantienRef.current.visible = true;
+    } else if (dantienRef.current) {
+      dantienRef.current.visible = false;
+    }
+  });
+
+  return (
+    <mesh ref={dantienRef} geometry={DANTIEN_GEO}>
+      <meshStandardMaterial color="#fbbf24" emissive="#fbbf24" emissiveIntensity={4} transparent opacity={0.7} />
+    </mesh>
+  );
+};
+
+// ─── Main Skeleton ───────────────────────────────────────────────────────────
 const Skeleton: React.FC<Biomechanics3DProps> = ({ pose, face, leftHand, rightHand, mirror = true, skeletonScale, videoSize, cropInfo }) => {
-  const getPos = (l: any) => {
+  const getPos = useCallback((l: any): THREE.Vector3 => {
     if (!l) return new THREE.Vector3(0, 0, 0);
-    const w = videoSize.width;
-    const h = videoSize.height;
-    
-    // MAP LANDMARK TO CROP: (l.x * w - sx) / sw
-    const relX = (l.x * w - cropInfo.sx) / cropInfo.sw;
-    const relY = (l.y * h - cropInfo.sy) / cropInfo.sh;
-    
-    // DIRECT FRUSTUM MAPPING: Map relX (0..1) to -0.5..0.5, relY (0..1) to 0.5..-0.5
-    // The 3D canvas now matches the video aspect ratio perfectly.
+    const relX = (l.x * videoSize.width  - cropInfo.sx) / cropInfo.sw;
+    const relY = (l.y * videoSize.height - cropInfo.sy) / cropInfo.sh;
     const xBase = mirror ? (0.5 - relX) : (relX - 0.5);
-    const yBase = 0.5 - relY;
-    return new THREE.Vector3(xBase, yBase, -l.z);
-  };
+    return new THREE.Vector3(xBase, 0.5 - relY, -(l.z || 0));
+  }, [videoSize.width, videoSize.height, cropInfo.sx, cropInfo.sy, cropInfo.sw, cropInfo.sh, mirror]);
 
-  // 1. Calculate Core Alignments for whole-skeleton coloring
-  const alignments = useMemo(() => {
-    if (!pose) return null;
-    const p11 = getPos(pose[11]);
-    const p12 = getPos(pose[12]);
-    const p23 = getPos(pose[23]);
-    const p24 = getPos(pose[24]);
-    
+  // Key PT joint angles — memoized from pose
+  const angles = useMemo(() => {
+    if (!pose || pose.length < 33) return null;
+    const gp = (i: number) => getPos(pose[i]);
     return {
-      shoulders: Math.abs(p11.y - p12.y) * 100,
-      hips: Math.abs(p23.y - p24.y) * 100,
-      lElbow: pose[11]&&pose[13]&&pose[15] ? Math.abs(getAngle(getPos(pose[11]), getPos(pose[13]), getPos(pose[15])) - 90) : 100,
-      rElbow: pose[12]&&pose[14]&&pose[16] ? Math.abs(getAngle(getPos(pose[12]), getPos(pose[14]), getPos(pose[16])) - 90) : 100,
+      lShoulder: getAngle(gp(13), gp(11), gp(23)),   // L arm vs torso
+      rShoulder: getAngle(gp(14), gp(12), gp(24)),
+      lElbow:    getAngle(gp(11), gp(13), gp(15)),
+      rElbow:    getAngle(gp(12), gp(14), gp(16)),
+      lKnee:     getAngle(gp(23), gp(25), gp(27)),
+      rKnee:     getAngle(gp(24), gp(26), gp(28)),
+      hipTilt:   Math.abs(getPos(pose[23]).y - getPos(pose[24]).y) * 100,
+      shoulderTilt: Math.abs(getPos(pose[11]).y - getPos(pose[12]).y) * 100,
     };
   }, [pose, getPos]);
 
+  // Spine alignment color
+  const spineColor = useMemo(() => {
+    if (!pose || !pose[0] || !pose[23] || !pose[24]) return '#10b981';
+    const nose = getPos(pose[0]);
+    const hipC = new THREE.Vector3().lerpVectors(getPos(pose[23]), getPos(pose[24]), 0.5);
+    const spineVec = new THREE.Vector3().subVectors(nose, hipC).normalize();
+    const err = Math.abs(spineVec.angleTo(new THREE.Vector3(0, 1, 0)) * 180 / Math.PI);
+    return getAlignmentColor(err, 18, 5);
+  }, [pose, getPos]);
+
+  const dantienPos = useMemo(() => {
+    if (!pose || !pose[23] || !pose[24]) return null;
+    return new THREE.Vector3().lerpVectors(getPos(pose[23]), getPos(pose[24]), 0.5);
+  }, [pose, getPos]);
+
+  // PT angle label items: joint index → which angle key to display
+  const PT_LABELS: { b: number; label: string; angle?: number; color: string }[] = useMemo(() => {
+    if (!angles) return [];
+    return [
+      { b: 13, label: 'L.ELBOW',    angle: angles.lElbow,    color: getAlignmentColor(Math.abs(angles.lElbow - 90), 25, 8) },
+      { b: 14, label: 'R.ELBOW',    angle: angles.rElbow,    color: getAlignmentColor(Math.abs(angles.rElbow - 90), 25, 8) },
+      { b: 25, label: 'L.KNEE',     angle: angles.lKnee,     color: getAlignmentColor(Math.abs(angles.lKnee - 170), 20, 8) },
+      { b: 26, label: 'R.KNEE',     angle: angles.rKnee,     color: getAlignmentColor(Math.abs(angles.rKnee - 170), 20, 8) },
+      { b: 11, label: 'L.SHLD',     angle: angles.lShoulder, color: getAlignmentColor(Math.abs(angles.lShoulder - 90), 30, 10) },
+      { b: 12, label: 'R.SHLD',     angle: angles.rShoulder, color: getAlignmentColor(Math.abs(angles.rShoulder - 90), 30, 10) },
+    ];
+  }, [angles]);
+
   return (
     <group>
-      <VectorLine start={new THREE.Vector3(-0.5, 0, -0.5)} end={new THREE.Vector3(0.5, 0, -0.5)} color="#ffffff" opacity={0.05} />
-
       {/* POSE SKELETON */}
       {pose && (
         <group>
-          {/* Joints: Full-Body Surgical Grid */}
-          {pose.map((l, i) => (
-            l.visibility > 0.4 && (
-              <group key={`p-${i}`} position={getPos(l)}>
-                <mesh>
-                  <sphereGeometry args={[0.0018 * skeletonScale, 16, 16]} />
-                  <meshStandardMaterial 
-                    color="#ffffff" 
-                    emissive="#ffffff" 
-                    emissiveIntensity={3} 
-                    transparent 
-                    opacity={l.visibility} 
-                  />
-                </mesh>
-                {/* MEDICAL PULSE ANIMATION */}
-                {[11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28].includes(i) && (
-                  <PulseJoint color="#ffffff" scale={skeletonScale} />
-                )}
-              </group>
-            )
-          ))}
-          {/* Main Connections with Alignment Coloring */}
+          {/* Joints */}
+          {pose.map((l, i) => {
+            if ((l.visibility || 0) < 0.4) return null;
+            const p = getPos(l);
+            const col = i === 0 ? spineColor : '#ffffff';
+            return (
+              <mesh key={`pj-${i}`} position={p} geometry={JOINT_GEO}>
+                <meshStandardMaterial color={col} emissive={col} emissiveIntensity={4} transparent opacity={Math.min(1, (l.visibility || 0) + 0.2)} />
+              </mesh>
+            );
+          })}
+
+          {/* Bones with alignment coloring */}
           {POSE_CONNECTIONS.map(([a, b], i) => {
-            if (!pose[a] || !pose[b] || pose[a].visibility < 0.5 || pose[b].visibility < 0.5) return null;
+            if (!pose[a] || !pose[b]) return null;
+            if ((pose[a].visibility || 0) < 0.4 || (pose[b].visibility || 0) < 0.4) return null;
             const pA = getPos(pose[a]);
             const pB = getPos(pose[b]);
-            
-            let color = "#10b981";
-            let opacity = 0.4;
-            
-            if (alignments) {
-              if ((a === 11 && b === 12)) color = getAlignmentColor(alignments.shoulders, 6, 1.5).color;
-              if ((a === 23 && b === 24)) color = getAlignmentColor(alignments.hips, 6, 1.5).color;
-              if ((a === 11 && b === 13) || (a === 13 && b === 15)) color = getAlignmentColor(alignments.lElbow, 25, 8).color;
-              if ((a === 12 && b === 14) || (a === 14 && b === 16)) color = getAlignmentColor(alignments.rElbow, 25, 8).color;
+
+            let color = '#10b981';
+            if (angles) {
+              if (a === 11 && b === 12) color = getAlignmentColor(angles.shoulderTilt, 6, 2);
+              if (a === 23 && b === 24) color = getAlignmentColor(angles.hipTilt, 6, 2);
+              if ((a === 11 && b === 13) || (a === 13 && b === 15)) color = getAlignmentColor(Math.abs(angles.lElbow - 90), 25, 8);
+              if ((a === 12 && b === 14) || (a === 14 && b === 16)) color = getAlignmentColor(Math.abs(angles.rElbow - 90), 25, 8);
+              if ((a === 23 && b === 25) || (a === 25 && b === 27)) color = getAlignmentColor(Math.abs(angles.lKnee - 170), 20, 8);
+              if ((a === 24 && b === 26) || (a === 26 && b === 28)) color = getAlignmentColor(Math.abs(angles.rKnee - 170), 20, 8);
             }
 
             return (
-              <group key={`pl-${i}`}>
-                <VectorLine start={pA} end={pB} color={color} opacity={opacity} />
-                {/* QUANT METRICS: Digital protractor for elbows & knees */}
-                {[13, 14, 25, 26].includes(b) && (
-                   <Html center position={pB.clone().add(new THREE.Vector3(0.1, 0.1, 0))}>
-                      <div className="medical-label">
-                         {b === 13 ? alignments?.lElbow.toFixed(1) : 
-                          b === 14 ? alignments?.rElbow.toFixed(1) : 
-                          b === 25 ? "L_KNEE" : "R_KNEE"}
-                         { [13,14].includes(b) ? "°" : "" }
-                      </div>
-                   </Html>
-                )}
+              <group key={`pb-${i}`}>
+                <VectorLine start={pA} end={pB} color={color} opacity={0.6} />
               </group>
             );
           })}
 
-          {/* NECK MAPPING (Medical Precision) */}
+          {/* PT ANGLE LABELS — only on key joints */}
+          {PT_LABELS.map(({ b, label, angle, color }) => {
+            if (!pose[b] || (pose[b].visibility || 0) < 0.4) return null;
+            const p = getPos(pose[b]);
+            return (
+              <Html key={`pt-${b}`} center position={[p.x + 0.07, p.y + 0.05, 0]}>
+                <div className="medical-label" style={{ borderColor: color, color }}>
+                  <span style={{ fontSize: '9px', opacity: 0.7 }}>{label}</span>
+                  <br />
+                  <span style={{ fontSize: '13px', fontWeight: 900 }}>{angle?.toFixed(0)}°</span>
+                </div>
+              </Html>
+            );
+          })}
+
+          {/* Neck line */}
           {pose[11] && pose[12] && face && face[0] && (
-            <VectorLine 
-              start={new THREE.Vector3().lerpVectors(getPos(pose[11]), getPos(pose[12]), 0.5)} 
-              end={getPos(face[0])} 
-              color="#ffffff" 
-              opacity={0.3} 
+            <VectorLine
+              start={new THREE.Vector3().lerpVectors(getPos(pose[11]), getPos(pose[12]), 0.5)}
+              end={getPos(face[0])}
+              color={spineColor}
+              opacity={0.4}
             />
           )}
         </group>
       )}
 
-      {/* HANDS (Restored with Spirit Cones) */}
+      {/* HANDS */}
       {[leftHand, rightHand].map((hand, hIdx) => hand && (
         <group key={`h-${hIdx}`}>
           {hand.map((l, i) => (
-            <mesh key={`h-${hIdx}-${i}`} position={getPos(l)}>
-              <sphereGeometry args={[0.0015 * skeletonScale, 8, 8]} />
-              <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={2} />
+            <mesh key={`hj-${hIdx}-${i}`} position={getPos(l)} geometry={HAND_GEO}>
+              <meshStandardMaterial color="#00e5ff" emissive="#00e5ff" emissiveIntensity={3} />
             </mesh>
           ))}
           {HAND_CONNECTIONS.map(([a, b], i) => (
-            <VectorLine key={`hl-${hIdx}-${i}`} start={getPos(hand[a])} end={getPos(hand[b])} color="#00ffff" opacity={0.4} />
+            <VectorLine key={`hl-${hIdx}-${i}`} start={getPos(hand[a])} end={getPos(hand[b])} color="#00e5ff" opacity={0.45} />
           ))}
-          <SpiritCone 
-             start={getPos(hand[9])} 
-             normal={new THREE.Vector3().subVectors(getPos(hand[12]), getPos(hand[0])).normalize()} 
-             scale={0.12 * skeletonScale} 
-          />
         </group>
       ))}
 
-      {/* FACE (Iris Gaze Lasers) */}
-      {face && (
-        <group>
-          {face.filter((_, i) => i % 6 === 0).map((l, i) => (
-            <mesh key={`f-${i}`} position={getPos(l)}>
-              <sphereGeometry args={[0.0018, 4, 4]} />
-              <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={2} transparent opacity={0.6} />
-            </mesh>
-          ))}
-          {[468, 473].map(eyeIdx => {
-             if (!face[eyeIdx]) return null;
-             const p = getPos(face[eyeIdx]);
-             return <VectorLine key={`eye-${eyeIdx}`} start={p} end={p.clone().add(new THREE.Vector3(0,0,-0.1))} color="#00ffff" opacity={0.6} />;
-          })}
-        </group>
-      )}
-
-      <Dantien pose={pose} getPos={getPos} skeletonScale={skeletonScale} />
-      <ChakraSystem pose={pose} getPos={getPos} skeletonScale={skeletonScale} />
+      {/* Dantien pulsing center — single consolidated useFrame */}
+      <AnimatedScene dantienPos={dantienPos} skeletonScale={skeletonScale} />
     </group>
   );
 };
 
-const ChakraSystem: React.FC<{ pose: any[] | null, getPos: (l: any) => THREE.Vector3, skeletonScale: number }> = ({ pose, getPos, skeletonScale }) => {
-  if (!pose || !pose[0] || !pose[23] || !pose[24]) return null;
-  const nose = getPos(pose[0]);
-  const hipCenter = new THREE.Vector3().lerpVectors(getPos(pose[23]), getPos(pose[24]), 0.5);
-  
-  const spineVec = new THREE.Vector3().subVectors(nose, hipCenter).normalize();
-  const spineError = Math.abs(spineVec.angleTo(new THREE.Vector3(0, 1, 0)) * 180 / Math.PI);
-  const { color: spineColor, intensity: spineIntensity } = getAlignmentColor(spineError, 18, 5);
-
-  const chakras = [
-    { color: '#a855f7', ratio: -0.15 }, { color: '#6366f1', ratio: 0.05 },
-    { color: '#3b82f6', ratio: 0.25 }, { color: '#22c55e', ratio: 0.45 },
-    { color: '#eab308', ratio: 0.65 }, { color: '#f97316', ratio: 0.85 },
-    { color: '#ef4444', ratio: 1.05 },
-  ];
-
-  return (
-    <group>
-      {chakras.map((c, i) => {
-        const p = new THREE.Vector3().lerpVectors(nose, hipCenter, c.ratio);
-        return (
-          <group key={`ch-${i}`}>
-            <mesh position={p}>
-              <sphereGeometry args={[0.0025 * skeletonScale, 16, 16]} />
-              <meshStandardMaterial color={spineColor === '#22c55e' ? '#22c55e' : c.color} emissive={spineColor === '#22c55e' ? '#22c55e' : c.color} emissiveIntensity={spineIntensity} />
-            </mesh>
-            <VectorLine start={p.clone().add(new THREE.Vector3(0,0,0.08))} end={p.clone().add(new THREE.Vector3(0,0,-0.08))} color={spineColor} opacity={0.6} />
-          </group>
-        );
-      })}
-    </group>
-  );
-};
-
-const PulseJoint: React.FC<{ color: string, scale: number }> = ({ color, scale }) => {
-  const meshRef = useRef<THREE.Mesh>(null);
-  useFrame(({ clock }) => {
-    if (meshRef.current) {
-      const t = clock.getElapsedTime() % 2;
-      const s = t * 0.05 * scale;
-      meshRef.current.scale.set(s, s, s);
-      const mat = meshRef.current.material as THREE.MeshStandardMaterial;
-      if (mat) mat.opacity = (1 - (t / 2)) * 0.5;
-    }
-  });
-
-  return (
-    <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]}>
-      <ringGeometry args={[0.8, 1, 32]} />
-      <meshStandardMaterial color={color} transparent opacity={0.5} side={THREE.DoubleSide} />
-    </mesh>
-  );
-};
-
-const VectorLine: React.FC<{ start: THREE.Vector3, end: THREE.Vector3, color: string, opacity?: number }> = ({ start, end, color, opacity = 0.4 }) => {
-  return (
-    <line>
-      <bufferGeometry attach="geometry">
-        <bufferAttribute attach="attributes-position" args={[new Float32Array([...start.toArray(), ...end.toArray()]), 3]} />
-      </bufferGeometry>
-      <lineBasicMaterial attach="material" color={color} transparent opacity={opacity} linewidth={2} />
-    </line>
-  );
-};
-
-const SpiritCone: React.FC<{ start: THREE.Vector3, normal: THREE.Vector3, scale: number }> = ({ start, normal, scale }) => {
-  const meshRef = useRef<THREE.Mesh>(null);
-  useFrame(() => {
-    if (meshRef.current) {
-      meshRef.current.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
-    }
-  });
-  return (
-    <mesh ref={meshRef} position={start}>
-      <coneGeometry args={[scale * 0.4, scale, 32, 1, true]} />
-      <meshStandardMaterial color="#fbbf24" emissive="#fbbf24" emissiveIntensity={2} transparent opacity={0.05} wireframe />
-    </mesh>
-  );
-};
-
-const Dantien: React.FC<{ pose: any[] | null, getPos: (l: any) => THREE.Vector3, skeletonScale: number }> = ({ pose, getPos, skeletonScale }) => {
-  const meshRef = useRef<THREE.Mesh>(null);
-  useFrame(({ clock }) => {
-    if (!meshRef.current || !pose || !pose[23] || !pose[24]) return;
-    const pulse = Math.sin(clock.elapsedTime * 4) * 0.1 + 1.0;
-    meshRef.current.scale.set(pulse, pulse, pulse);
-    meshRef.current.position.lerpVectors(getPos(pose[23]), getPos(pose[24]), 0.5);
-  });
-  return (
-    <mesh ref={meshRef}>
-      <sphereGeometry args={[0.005 * skeletonScale, 32, 32]} />
-      <meshStandardMaterial color="#fbbf24" emissive="#fbbf24" emissiveIntensity={3} transparent opacity={0.6} />
-    </mesh>
-  );
-};
-
+// ─── Root Export ─────────────────────────────────────────────────────────────
 export const Biomechanics3D: React.FC<Biomechanics3DProps> = (props) => {
-  const aspectW = props.videoSize?.width ? props.videoSize.width / 1000 : 1;
-  const aspectH = props.videoSize?.height ? props.videoSize.height / 1000 : 1;
-
   return (
-    <div className="biomechanics-3d-overlay" style={{ 
-      width: `${props.videoViewport.width}px`, 
-      height: `${props.videoViewport.height}px`,
-      top: `${props.videoViewport.top}px`,
-      left: `${props.videoViewport.left}px`
-    }}>
-      <Canvas gl={{ alpha: true, antialias: true }} dpr={[1, 2]} style={{ width: '100%', height: '100%' }}>
-        <OrthographicCamera 
-          makeDefault 
-          left={-aspectW / 2} 
-          right={aspectW / 2} 
-          top={aspectH / 2} 
-          bottom={-aspectH / 2} 
-          near={0.1} 
-          far={100} 
-          position={[0, 0, 10]} 
-        />
-        <ambientLight intensity={0.5} />
-        <pointLight position={[10, 10, 10]} intensity={2} />
-        <Stars radius={100} depth={50} count={2000} factor={4} saturation={0} fade speed={0.5} />
+    <div
+      className="biomechanics-3d-overlay"
+      style={{
+        width:  `${props.videoViewport.width}px`,
+        height: `${props.videoViewport.height}px`,
+        top:    `${props.videoViewport.top}px`,
+        left:   `${props.videoViewport.left}px`,
+      }}
+    >
+      <Canvas
+        gl={{ alpha: true, antialias: false, powerPreference: 'high-performance' }}
+        dpr={1}                        // Lock to 1x — no 2x Retina upscaling on the overlay
+        frameloop="demand"             // Only re-render when props change, not 60fps constant
+        style={{ width: '100%', height: '100%' }}
+      >
+        <OrthographicCamera makeDefault left={-0.5} right={0.5} top={0.5} bottom={-0.5} near={0.1} far={100} position={[0, 0, 10]} />
+        <ambientLight intensity={0.6} />
+        <pointLight position={[5, 5, 10]} intensity={1.5} />
         <Skeleton {...props} />
       </Canvas>
     </div>
