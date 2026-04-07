@@ -12,7 +12,8 @@ import { computeNervousSystem, NERVE_COLORS } from '../lib/NervousSystem';
  *   3. JOINTS    — animated ROM circles that breathe open/closed per joint health
  */
 
-export type VisualizationMode = 'SKELETON' | 'NERVOUS' | 'JOINTS';
+export const VISUALIZATION_MODES = ['SKELETON', 'NERVOUS', 'JOINTS'] as const;
+export type VisualizationMode = typeof VISUALIZATION_MODES[number];
 
 interface Biomechanics3DProps {
   pose: any[] | null;

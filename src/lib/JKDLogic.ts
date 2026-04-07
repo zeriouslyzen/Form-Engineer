@@ -97,7 +97,7 @@ export class JKDLogic {
    * Recognizes hand gestures for camera control.
    * Returns: Gestures for Zoom and Skeleton Scale.
    */
-  public detectHandGesture(handLandmarks: any[]): 'FIVE' | 'FIST' | 'THUMBS_DOWN' | 'ONE' | 'TWO' | 'THREE' | 'PINCH' | null {
+  public detectHandGesture(handLandmarks: any[]): 'FIVE' | 'FIST' | 'THUMBS_DOWN' | 'THUMBS_UP' | 'ONE' | 'TWO' | 'THREE' | 'PINCH' | null {
     if (!handLandmarks || handLandmarks.length < 21) return null;
 
     const wrist   = handLandmarks[0];
@@ -142,10 +142,14 @@ export class JKDLogic {
     // ONE: Index only
     if (fingersExtended[0] && extendedCount === 1) return 'ONE';
 
-    // THUMBS DOWN: thumb tip below thumb base, fingers closed
+    // THUMBS DOWN: thumb tip well below thumb base, fingers closed
     const thumbBase = handLandmarks[2];
     const isThumbDown = thumbTip.y > thumbBase.y + 0.05;
     if (extendedCount <= 1 && isThumbDown) return 'THUMBS_DOWN';
+
+    // THUMBS UP: thumb tip well above thumb base, fingers closed
+    const isThumbUp = thumbTip.y < thumbBase.y - 0.05;
+    if (extendedCount <= 1 && isThumbUp) return 'THUMBS_UP';
 
     // FIST: all closed
     if (extendedCount === 0) return 'FIST';

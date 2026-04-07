@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { JKDLogic } from '../lib/JKDLogic';
 import { AudioCoach } from '../lib/AudioService';
 import { VoiceAI } from '../lib/VoiceAI';
-import { Biomechanics3D, VisualizationMode } from './Biomechanics3D';
+import { Biomechanics3D } from './Biomechanics3D';
+import type { VisualizationMode } from './Biomechanics3D';
 import { tracking } from '../lib/TrackingEngine';
 
 /**
@@ -18,8 +19,12 @@ import { tracking } from '../lib/TrackingEngine';
 // How long (ms) a gesture must be held before it fires
 const GESTURE_HOLD_MS = 700;
 
-// Zoom step per PINCH trigger
-const ZOOM_STEP = 0.4;
+// Zoom step per THUMBS_UP trigger
+const ZOOM_STEP = 0.5;
+const ZOOM_MAX  = 5.0;
+
+// Bilateral detection: both hands must show THUMBS_UP within this window (ms)
+const BILATERAL_WINDOW_MS = 600;
 
 export const HolisticTracker: React.FC = () => {
   const videoRef      = useRef<HTMLVideoElement>(null);
@@ -43,11 +48,18 @@ export const HolisticTracker: React.FC = () => {
   const vizModeRef = useRef<VisualizationMode>('SKELETON');
   const syncMode = (m: VisualizationMode) => { vizModeRef.current = m; setVizMode(m); };
 
-  // ── Gesture debounce state (refs so they work inside rAF closure) ─────────
-  const gestureRef     = useRef<string | null>(null);
-  const gestureStart   = useRef<number>(0);
-  const gestureFired   = useRef(false);
-  const [activeGesture, setActiveGesture] = useState<string | null>(null); // for HUD
+  // ── Gesture debounce state ────────────────────────────────────────────────
+  const gestureRef      = useRef<string | null>(null);
+  const gestureStart    = useRef<number>(0);
+  const gestureFired    = useRef(false);
+  const [activeGesture, setActiveGesture] = useState<string | null>(null);
+  const [zoomLocked, setZoomLocked]       = useState(false);
+  const zoomLockedRef   = useRef(false);
+
+  // Bilateral (both-thumbs-up) detection
+  const leftThumbUpAt   = useRef<number>(0);
+  const rightThumbUpAt  = useRef<number>(0);
+  const bothFired       = useRef(false);
 
   const [allLandmarks, setAllLandmarks] = useState<{
     pose: any[] | null;
@@ -115,19 +127,36 @@ export const HolisticTracker: React.FC = () => {
   const handleZoomChange = useCallback((v: number) => { setZoom(v); applyHardwareZoom(v); }, [applyHardwareZoom]);
 
   // ─── GESTURE PROCESSING ──────────────────────────────────────────────────
-  // Called every frame inside holistic.onResults with the raw hand landmarks
+  // Both hands are evaluated: left for bilateral, dominant (right fall back left) for single
   const processGesture = useCallback((leftHand: any[] | null, rightHand: any[] | null) => {
-    // Use whichever hand is more visible — prefer right, fall back to left
-    const hand = rightHand || leftHand;
-    const gesture = hand ? logic.detectHandGesture(hand) : null;
-
-    // Update HUD immediately (no hold requirement for display)
-    setActiveGesture(gesture);
-
     const now = Date.now();
 
+    const leftGesture  = leftHand  ? logic.detectHandGesture(leftHand)  : null;
+    const rightGesture = rightHand ? logic.detectHandGesture(rightHand) : null;
+
+    // ── BILATERAL: both thumbs up → zoom lock toggle ──────────────────────
+    if (leftGesture  === 'THUMBS_UP') leftThumbUpAt.current  = now;
+    if (rightGesture === 'THUMBS_UP') rightThumbUpAt.current = now;
+
+    const bothUp = (now - leftThumbUpAt.current  < BILATERAL_WINDOW_MS) &&
+                   (now - rightThumbUpAt.current < BILATERAL_WINDOW_MS);
+
+    if (bothUp && !bothFired.current) {
+      bothFired.current = true;
+      const next = !zoomLockedRef.current;
+      zoomLockedRef.current = next;
+      setZoomLocked(next);
+      coach.speak('PUNCH_END'); // audio feedback
+      setActiveGesture('BOTH_THUMBS_UP');
+      return;
+    }
+    if (!bothUp) bothFired.current = false;
+
+    // ── SINGLE HAND: use right, fall back to left ─────────────────────────
+    const gesture = rightGesture || leftGesture;
+    setActiveGesture(gesture);
+
     if (gesture !== gestureRef.current) {
-      // Gesture changed — reset hold timer
       gestureRef.current = gesture;
       gestureStart.current = now;
       gestureFired.current = false;
@@ -135,25 +164,27 @@ export const HolisticTracker: React.FC = () => {
     }
 
     if (!gesture || gestureFired.current) return;
-
     const held = now - gestureStart.current;
     if (held < GESTURE_HOLD_MS) return;
 
-    // Gesture has been held long enough — fire action
     gestureFired.current = true;
 
-    if (gesture === 'ONE')   { syncMode('SKELETON'); coach.speak('PUNCH_END'); }
-    if (gesture === 'TWO')   { syncMode('NERVOUS');  coach.speak('PUNCH_END'); }
-    if (gesture === 'THREE') { syncMode('JOINTS');   coach.speak('PUNCH_END'); }
+    // Mode switches
+    if (gesture === 'ONE')   syncMode('SKELETON');
+    if (gesture === 'TWO')   syncMode('NERVOUS');
+    if (gesture === 'THREE') syncMode('JOINTS');
 
-    if (gesture === 'PINCH') {
-      const next = Math.min(5, zoomRef.current + ZOOM_STEP);
-      handleZoomChange(next);
-    }
-    if (gesture === 'THUMBS_DOWN') {
-      // Zoom out rapidly — one hold resets to 1x
-      handleZoomChange(1.0);
-      setPan({ x: 0, y: 0 });
+    // Zoom (only if not locked)
+    if (!zoomLockedRef.current) {
+      if (gesture === 'THUMBS_UP') {
+        const next = Math.min(ZOOM_MAX, zoomRef.current + ZOOM_STEP);
+        handleZoomChange(next);
+      }
+      if (gesture === 'THUMBS_DOWN') {
+        const next = Math.max(1.0, zoomRef.current - ZOOM_STEP);
+        handleZoomChange(next);
+        if (next <= 1.0) setPan({ x: 0, y: 0 }); // reset pan when back to 1x
+      }
     }
   }, [logic, coach, handleZoomChange]);
 
@@ -325,13 +356,15 @@ export const HolisticTracker: React.FC = () => {
 
   // ─── GESTURE HUD LABEL ───────────────────────────────────────────────────
   const gestureLabel: Record<string, string> = {
-    ONE: '☝️  1 — SKELETON',
-    TWO: '✌️  2 — NERVOUS',
-    THREE: '🤟  3 — JOINTS',
-    PINCH: '👌  ZOOM IN',
-    THUMBS_DOWN: '👎  ZOOM RESET',
-    FIVE: '🖐️  FIVE',
-    FIST: '✊  FIST',
+    ONE:           '☝️  1 — SKELETON',
+    TWO:           '✌️  2 — NERVOUS',
+    THREE:         '🤟  3 — JOINTS',
+    THUMBS_UP:     '👍  ZOOM IN',
+    THUMBS_DOWN:   '👎  ZOOM OUT',
+    BOTH_THUMBS_UP:'👍👍  ZOOM LOCK',
+    FIVE:          '🖐️  FIVE',
+    FIST:          '✊  FIST',
+    PINCH:         '👌  PINCH',
   };
 
   // ─── SPLASH SCREEN ───────────────────────────────────────────────────────
@@ -351,8 +384,9 @@ export const HolisticTracker: React.FC = () => {
             <div>☝️  HOLD 1 → SKELETON MODE</div>
             <div>✌️  HOLD 2 → NERVOUS MODE</div>
             <div>🤟  HOLD 3 → JOINTS MODE</div>
-            <div>👌  HOLD PINCH → ZOOM IN</div>
-            <div>👎  THUMBS DOWN → ZOOM RESET</div>
+            <div>👍  HOLD THUMBS UP → ZOOM IN</div>
+            <div>👎  HOLD THUMBS DOWN → ZOOM OUT</div>
+            <div>👍👍  BOTH THUMBS UP → ZOOM LOCK</div>
           </div>
 
           <select
@@ -415,6 +449,9 @@ export const HolisticTracker: React.FC = () => {
           <div className="text-[#ef4444] text-xs tracking-widest mt-1">⚠ {stats.telegraphs} TELEGRAPH{stats.telegraphs > 1 ? 'S' : ''}</div>
         )}
         <div className="text-[#10b981]/40 text-[10px] tracking-widest mt-2">{zoom.toFixed(1)}x ZOOM</div>
+        {zoomLocked && (
+          <div className="text-[#fbbf24] text-[10px] tracking-widest mt-1">🔒 ZOOM LOCKED</div>
+        )}
       </div>
 
       {/* ZOOM SLIDER */}
