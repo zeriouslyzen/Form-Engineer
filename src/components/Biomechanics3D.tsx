@@ -2,7 +2,7 @@ import React, { useRef, useMemo, useCallback, useState } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrthographicCamera, Html } from '@react-three/drei';
 import * as THREE from 'three';
-import { computeNervousSystem, DERMATOME_COLORS } from '../lib/NervousSystem';
+import { computeNervousSystem, NERVE_COLORS } from '../lib/NervousSystem';
 
 /**
  * BIOMECHANICS 3D ENGINE — V5.0
@@ -77,54 +77,40 @@ const VectorLine = React.memo(({ start, end, color, opacity = 0.5 }: {
   );
 });
 
-// ─── MODE 2: Animated Nerve Pulse along a segment ───────────────────────────
-const NervePulse: React.FC<{
-  from: THREE.Vector3; to: THREE.Vector3; color: string; pulseOffset: number;
-}> = ({ from, to, color, pulseOffset }) => {
-  const meshRef = useRef<THREE.Mesh>(null);
-  const GEO = useMemo(() => new THREE.SphereGeometry(0.004, 6, 6), []);
+// ─── MODE 2: ALL nerve pulses in ONE useFrame ────────────────────────────────
+// Single AnimatedPulses component — one useFrame drives all dots
+const AnimatedPulses: React.FC<{ segments: import('../lib/NervousSystem').NerveSegment[] }> = ({ segments }) => {
+  const refs = useRef<(THREE.Mesh | null)[]>([]);
 
   useFrame(({ clock }) => {
-    if (!meshRef.current) return;
-    // t oscillates 0→1 with stagger offset
-    const t = ((clock.getElapsedTime() * 0.6 + pulseOffset) % 1.0);
-    meshRef.current.position.lerpVectors(from, to, t);
-    const mat = meshRef.current.material as THREE.MeshStandardMaterial;
-    // Brightest in middle of journey, dim at endpoints
-    mat.emissiveIntensity = Math.sin(t * Math.PI) * 6 + 0.5;
+    const t = clock.getElapsedTime();
+    segments.forEach((seg, i) => {
+      const mesh = refs.current[i];
+      if (!mesh) return;
+      const progress = ((t * seg.speed + seg.offset) % 1.0);
+      mesh.position.lerpVectors(seg.from, seg.to, progress);
+      const mat = mesh.material as THREE.MeshStandardMaterial;
+      mat.emissiveIntensity = Math.sin(progress * Math.PI) * 8 + 0.3;
+    });
   });
 
   return (
-    <mesh ref={meshRef} geometry={GEO}>
-      <meshStandardMaterial color={color} emissive={color} emissiveIntensity={3} transparent opacity={0.9} />
-    </mesh>
+    <>
+      {segments.map((seg, i) => {
+        // Size of pulse dot scales with nerve type: trunk=bigger, peripheral=tiny
+        const r = seg.type === 'cns' ? 0.005 : seg.type === 'motor' ? 0.0035 : 0.002;
+        return (
+          <mesh key={i} ref={el => { refs.current[i] = el; }}>
+            <sphereGeometry args={[r, 5, 5]} />
+            <meshStandardMaterial color={seg.color} emissive={seg.color} emissiveIntensity={4} transparent opacity={0.95} />
+          </mesh>
+        );
+      })}
+    </>
   );
 };
 
-// Pulsing spine dot (ganglion)
-const GanglionNode: React.FC<{ position: THREE.Vector3; color: string; label: string }> = ({ position, color, label }) => {
-  const meshRef = useRef<THREE.Mesh>(null);
-  useFrame(({ clock }) => {
-    if (!meshRef.current) return;
-    const s = Math.sin(clock.getElapsedTime() * 2.5) * 0.15 + 1.0;
-    meshRef.current.scale.setScalar(s);
-  });
-  return (
-    <group position={position}>
-      <mesh ref={meshRef}>
-        <sphereGeometry args={[0.006, 10, 10]} />
-        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={5} transparent opacity={0.9} />
-      </mesh>
-      <Html center position={[0.05, 0, 0]}>
-        <div style={{
-          color, fontFamily: 'monospace', fontSize: '9px',
-          fontWeight: 900, letterSpacing: '0.1em', opacity: 0.8,
-          textShadow: `0 0 8px ${color}`,
-        }}>{label}</div>
-      </Html>
-    </group>
-  );
-};
+
 
 // ─── MODE 3: Joint ROM Circle ────────────────────────────────────────────────
 // Circles that breathe open (full ROM) or close (restricted) based on joint angle health
@@ -265,8 +251,8 @@ const Scene: React.FC<Biomechanics3DProps & { mode: VisualizationMode }> = (prop
   }, [pose, getPos]);
 
   const nervousData = useMemo(() =>
-    mode === 'NERVOUS' ? computeNervousSystem(pose, getPos) : null,
-  [pose, getPos, mode]);
+    mode === 'NERVOUS' ? computeNervousSystem(pose, getPos, leftHand, rightHand) : null,
+  [pose, getPos, leftHand, rightHand, mode]);
 
   const dantienPos = useMemo(() => {
     if (!pose || !pose[23] || !pose[24]) return null;
@@ -341,58 +327,22 @@ const Scene: React.FC<Biomechanics3DProps & { mode: VisualizationMode }> = (prop
   // ── MODE 2: NERVOUS SYSTEM ─────────────────────────────────────────────────
   const renderNervous = () => nervousData && (
     <group>
-      {/* Spine cord line */}
-      {nervousData.spinePoints.slice(0, -1).map((p, i) => (
-        <VectorLine
-          key={`sp-${i}`}
-          start={p}
-          end={nervousData.spinePoints[i + 1]}
-          color="#a5f3fc"
-          opacity={0.7}
-        />
+      {/* All static nerve lines — differentiated by type/opacity */}
+      {nervousData.map((seg, i) => (
+        <VectorLine key={`ns-${i}`} start={seg.from} end={seg.to} color={seg.color} opacity={seg.opacity} />
       ))}
 
-      {/* Nerve branch lines */}
-      {nervousData.nerveSegments.map((seg, i) => (
-        <VectorLine key={`ns-${i}`} start={seg.from} end={seg.to} color={seg.color} opacity={0.35} />
-      ))}
+      {/* Single consolidated animation loop for ALL pulse dots */}
+      <AnimatedPulses segments={nervousData} />
 
-      {/* Animated signal pulses along each nerve */}
-      {nervousData.nerveSegments.map((seg, i) => (
-        <NervePulse key={`np-${i}`} from={seg.from} to={seg.to} color={seg.color} pulseOffset={seg.pulseOffset} />
-      ))}
-
-      {/* Ganglion nodes (spinal nerve roots) */}
-      {nervousData.ganglionNodes.map((node, i) => (
-        <GanglionNode key={`gn-${i}`} position={node.position} color={node.color} label={node.label} />
-      ))}
-
-      {/* Hand nerve endpoints */}
-      {[leftHand, rightHand].map((hand, hIdx) => hand && (
-        <group key={`nh-${hIdx}`}>
-          {HAND_CONNECTIONS.map(([a, b], i) => (
-            <VectorLine key={`nhl-${hIdx}-${i}`} start={getPos(hand[a])} end={getPos(hand[b])} color={DERMATOME_COLORS.peripheral} opacity={0.3} />
-          ))}
-          {hand.slice(0, 5).map((l: any, i: number) => (
-            <NervePulse
-              key={`nhp-${hIdx}-${i}`}
-              from={getPos(hand[0])}
-              to={getPos(hand[i * 4])}
-              color={DERMATOME_COLORS.peripheral}
-              pulseOffset={0.6 + i * 0.08}
-            />
-          ))}
-        </group>
-      ))}
-
-      {/* Legend overlay */}
-      {pose && pose[12] && pose[12].visibility > 0.4 && (
-        <Html position={[getPos(pose[12]).x + 0.18, getPos(pose[12]).y, 0]}>
-          <div style={{ fontFamily: 'monospace', fontSize: '9px', lineHeight: 1.8 }}>
-            {Object.entries(DERMATOME_COLORS).map(([region, color]) => (
-              <div key={region} style={{ color, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <div style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />
-                {region.toUpperCase()}
+      {/* Nerve type legend */}
+      {pose && pose[12] && (pose[12].visibility || 0) > 0.4 && (
+        <Html position={[getPos(pose[12]).x + 0.20, getPos(pose[12]).y + 0.05, 0]}>
+          <div style={{ fontFamily: 'monospace', fontSize: '8px', lineHeight: 2.0, userSelect: 'none' }}>
+            {(Object.entries(NERVE_COLORS) as [string, string][]).map(([type, color]) => (
+              <div key={type} style={{ color, display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <div style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
+                <span style={{ letterSpacing: '0.1em' }}>{type.toUpperCase()}</span>
               </div>
             ))}
           </div>
