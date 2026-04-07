@@ -63,6 +63,19 @@ export const HolisticTracker: React.FC = () => {
   const pinchBaseZoom   = useRef(1.0);    // zoom level when pinch started
   const [pinchDelta, setPinchDelta] = useState(0); // for HUD indicator (-1..1)
 
+  // ── Kinetic Menu state ────────────────────────────────────────────────────
+  const [activeMenu, setActiveMenu] = useState<'ONE' | 'TWO' | null>(null);
+  const activeMenuRef = useRef<'ONE' | 'TWO' | null>(null);
+  const menuStartX    = useRef<number>(0);
+  const menuBaseIdx   = useRef<number>(0);
+  const menuIndexRef  = useRef<number>(0);
+  const [menuIndex, setMenuIndex] = useState<number>(0);
+
+  // ── Stealth Mode Background ───────────────────────────────────────────────
+  const [stealthMode, setStealthMode] = useState<boolean>(false);
+  const stealthModeRef = useRef<boolean>(false);
+  const syncStealth = (m: boolean) => { stealthModeRef.current = m; setStealthMode(m); };
+
   // ── Bilateral zoom lock ───────────────────────────────────────────────────
   const leftThumbUpAt   = useRef<number>(0);
   const rightThumbUpAt  = useRef<number>(0);
@@ -191,7 +204,53 @@ export const HolisticTracker: React.FC = () => {
       }
     }
 
-    // ── MODE SWITCHES (hold timer gestures) ────────────────────────────
+    // ── KINETIC DIAL MENUS (ONE = Mode, TWO = Background) ─────────────────
+    if (gesture === 'ONE' || gesture === 'TWO') {
+      if (hand) {
+        const wrist = hand[0];
+        if (activeMenuRef.current !== gesture) {
+          activeMenuRef.current = gesture;
+          setActiveMenu(gesture);
+          menuStartX.current = wrist.x;
+          // init index
+          const base = gesture === 'ONE' 
+            ? ['SKELETON', 'NERVOUS', 'JOINTS'].indexOf(vizModeRef.current)
+            : (stealthModeRef.current ? 1 : 0);
+          menuBaseIdx.current = base >= 0 ? base : 0;
+          menuIndexRef.current = menuBaseIdx.current;
+          setMenuIndex(menuBaseIdx.current);
+          coach.speak('PUNCH_END'); // small confirm blip on open
+        } else {
+          // Scrubbing
+          // Positive rawDelta means hand moved from right to left natively (which is physically moving left on unmirrored raw landmarks)
+          // We want moving physical right to scrub right.
+          // By default, wrist.x decreases as the hand translates left on screen. 
+          const rawDelta = menuStartX.current - wrist.x; 
+          const stepDelta = Math.round(rawDelta / 0.15); // normalized travel slot
+          const maxIdx = gesture === 'ONE' ? 2 : 1;
+          const newIdx = Math.max(0, Math.min(maxIdx, menuBaseIdx.current + stepDelta));
+          if (menuIndexRef.current !== newIdx) {
+            menuIndexRef.current = newIdx;
+            setMenuIndex(newIdx);
+          }
+        }
+        setActiveGesture(gesture);
+        gestureRef.current = null; // suppress legacy hold timers
+        return;
+      }
+    } else if (activeMenuRef.current !== null) {
+      // Finger dropped → apply selection
+      if (activeMenuRef.current === 'ONE') {
+         const modes: VisualizationMode[] = ['SKELETON', 'NERVOUS', 'JOINTS'];
+         syncMode(modes[menuIndexRef.current]);
+      } else if (activeMenuRef.current === 'TWO') {
+         syncStealth(menuIndexRef.current === 1);
+      }
+      activeMenuRef.current = null;
+      setActiveMenu(null);
+    }
+
+    // ── MODE SWITCHES (hold timer gestures fallback for discrete actions) ─
     setActiveGesture(gesture);
     if (gesture !== gestureRef.current) {
       gestureRef.current   = gesture;
@@ -203,9 +262,8 @@ export const HolisticTracker: React.FC = () => {
     if (now - gestureStart.current < GESTURE_HOLD_MS) return;
     gestureFired.current = true;
 
-    if (gesture === 'ONE')   syncMode('SKELETON');
-    if (gesture === 'TWO')   syncMode('NERVOUS');
-    if (gesture === 'THREE') syncMode('JOINTS');
+    // Remaining discrete gesture hold actions can live here
+    if (gesture === 'THREE') syncMode('JOINTS'); // legacy fallback
   }, [logic, coach, handleZoomChange]);
 
   // ─── MOUSE / DRAG ────────────────────────────────────────────────────────
@@ -359,9 +417,15 @@ export const HolisticTracker: React.FC = () => {
 
     ctx.save();
     ctx.clearRect(0, 0, w, h);
-    ctx.translate(w, 0);
-    ctx.scale(-1, 1);
-    ctx.drawImage(results.image, sx, sy, sw, sh, 0, 0, w, h);
+    if (!stealthModeRef.current) {
+      ctx.translate(w, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(results.image, sx, sy, sw, sh, 0, 0, w, h);
+    } else {
+      // STEALTH MODE: purely black void rendering
+      ctx.fillStyle = '#050505';
+      ctx.fillRect(0, 0, w, h);
+    }
     ctx.restore();
 
     if (results.poseLandmarks) {
@@ -399,9 +463,8 @@ export const HolisticTracker: React.FC = () => {
           </div>
 
           <div className="font-mono text-[10px] text-[#10b981]/40 tracking-widest text-center leading-7">
-            <div>☝️  HOLD 1 → SKELETON MODE</div>
-            <div>✌️  HOLD 2 → NERVOUS MODE</div>
-            <div>🤟  HOLD 3 → JOINTS MODE</div>
+            <div>☝️  HOLD 1 + MOVE ←/→ → TRACKING MODE DIAL</div>
+            <div>✌️  HOLD 2 + MOVE ←/→ → ENVIRONMENT DIAL</div>
             <div>👌  OK SIGN + MOVE ←/→ → KINETIC ZOOM</div>
             <div>👍👍  BOTH THUMBS UP → ZOOM LOCK</div>
           </div>
@@ -454,6 +517,31 @@ export const HolisticTracker: React.FC = () => {
             {!gestureFired.current && (
               <span className="text-[#10b981]/40 ml-2">— hold to confirm</span>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* KINETIC MENU OVERLAY */}
+      {activeMenu && (
+        <div className="fixed top-[20%] left-1/2 -translate-x-1/2 z-50 pointer-events-none">
+          <div className="bg-[#050505]/95 border border-[#10b981]/40 rounded-xl p-8 shadow-[0_0_60px_rgba(16,185,129,0.15)] backdrop-blur-xl flex flex-col items-center">
+            <div className="text-[#10b981]/60 text-xs font-mono tracking-[0.4em] uppercase mb-8">
+              {activeMenu === 'ONE' ? 'Set Tracking Mode' : 'Environment View'}
+            </div>
+            <div className="flex gap-4">
+              {(activeMenu === 'ONE' ? ['SKELETON', 'NERVOUS', 'JOINTS'] : ['CAMERA', 'BLACKOUT']).map((opt, idx) => (
+                <div key={opt} className={`px-8 py-4 border font-mono tracking-widest whitespace-nowrap transition-all duration-300 ${
+                  idx === menuIndex 
+                    ? 'border-[#10b981] bg-[#10b981]/10 text-[#10b981] scale-110 shadow-[0_0_30px_rgba(16,185,129,0.3)]' 
+                    : 'border-transparent text-white/30 scale-90 opacity-40'
+                }`}>
+                  {opt}
+                </div>
+              ))}
+            </div>
+            <div className="text-[#10b981]/70 font-mono text-[10px] tracking-[0.3em] mt-10 flex gap-4 items-center">
+              <span className="text-xl animate-pulse">←</span> SCRUB LEFT/RIGHT TO SELECT <span className="text-xl animate-pulse">→</span>
+            </div>
           </div>
         </div>
       )}
