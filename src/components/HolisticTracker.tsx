@@ -2,19 +2,30 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { JKDLogic } from '../lib/JKDLogic';
 import { AudioCoach } from '../lib/AudioService';
 import { VoiceAI } from '../lib/VoiceAI';
-import { Biomechanics3D } from './Biomechanics3D';
+import { Biomechanics3D, VisualizationMode } from './Biomechanics3D';
 import { tracking } from '../lib/TrackingEngine';
 
 /**
- * JKD DOJO — PHYSICAL THERAPY EDITION (V4.0)
- * Speed & quality optimized for clinical biomechanical analysis.
+ * JKD DOJO — PHYSICAL THERAPY EDITION (V5.0)
+ * Hand gesture controls:
+ *   ☝️  ONE   → SKELETON mode
+ *   ✌️  TWO   → NERVOUS mode
+ *   🤟  THREE → JOINTS mode
+ *   👌  PINCH → Zoom in
+ *   👎  THUMBS_DOWN → Zoom out (reset)
  */
+
+// How long (ms) a gesture must be held before it fires
+const GESTURE_HOLD_MS = 700;
+
+// Zoom step per PINCH trigger
+const ZOOM_STEP = 0.4;
 
 export const HolisticTracker: React.FC = () => {
   const videoRef      = useRef<HTMLVideoElement>(null);
   const canvasEngRef  = useRef<HTMLCanvasElement>(null);
   const rafRef        = useRef<number>(0);
-  const isProcessingRef = useRef(false); // Prevent frame back-pressure
+  const isProcessingRef = useRef(false);
 
   const [logic]  = useState(() => new JKDLogic());
   const [coach]  = useState(() => new AudioCoach());
@@ -26,6 +37,17 @@ export const HolisticTracker: React.FC = () => {
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
   const [isAiThinking, setIsAiThinking]   = useState(false);
   const [stats, setStats]                 = useState({ punches: 0, telegraphs: 0 });
+
+  // ── Mode state (owned here, driven by gestures + button) ──────────────────
+  const [vizMode, setVizMode] = useState<VisualizationMode>('SKELETON');
+  const vizModeRef = useRef<VisualizationMode>('SKELETON');
+  const syncMode = (m: VisualizationMode) => { vizModeRef.current = m; setVizMode(m); };
+
+  // ── Gesture debounce state (refs so they work inside rAF closure) ─────────
+  const gestureRef     = useRef<string | null>(null);
+  const gestureStart   = useRef<number>(0);
+  const gestureFired   = useRef(false);
+  const [activeGesture, setActiveGesture] = useState<string | null>(null); // for HUD
 
   const [allLandmarks, setAllLandmarks] = useState<{
     pose: any[] | null;
@@ -92,7 +114,50 @@ export const HolisticTracker: React.FC = () => {
 
   const handleZoomChange = useCallback((v: number) => { setZoom(v); applyHardwareZoom(v); }, [applyHardwareZoom]);
 
-  // ─── GESTURE / DRAG ──────────────────────────────────────────────────────
+  // ─── GESTURE PROCESSING ──────────────────────────────────────────────────
+  // Called every frame inside holistic.onResults with the raw hand landmarks
+  const processGesture = useCallback((leftHand: any[] | null, rightHand: any[] | null) => {
+    // Use whichever hand is more visible — prefer right, fall back to left
+    const hand = rightHand || leftHand;
+    const gesture = hand ? logic.detectHandGesture(hand) : null;
+
+    // Update HUD immediately (no hold requirement for display)
+    setActiveGesture(gesture);
+
+    const now = Date.now();
+
+    if (gesture !== gestureRef.current) {
+      // Gesture changed — reset hold timer
+      gestureRef.current = gesture;
+      gestureStart.current = now;
+      gestureFired.current = false;
+      return;
+    }
+
+    if (!gesture || gestureFired.current) return;
+
+    const held = now - gestureStart.current;
+    if (held < GESTURE_HOLD_MS) return;
+
+    // Gesture has been held long enough — fire action
+    gestureFired.current = true;
+
+    if (gesture === 'ONE')   { syncMode('SKELETON'); coach.speak('PUNCH_END'); }
+    if (gesture === 'TWO')   { syncMode('NERVOUS');  coach.speak('PUNCH_END'); }
+    if (gesture === 'THREE') { syncMode('JOINTS');   coach.speak('PUNCH_END'); }
+
+    if (gesture === 'PINCH') {
+      const next = Math.min(5, zoomRef.current + ZOOM_STEP);
+      handleZoomChange(next);
+    }
+    if (gesture === 'THUMBS_DOWN') {
+      // Zoom out rapidly — one hold resets to 1x
+      handleZoomChange(1.0);
+      setPan({ x: 0, y: 0 });
+    }
+  }, [logic, coach, handleZoomChange]);
+
+  // ─── MOUSE / DRAG ────────────────────────────────────────────────────────
   const handleMouseDown  = (e: React.MouseEvent) => { isDragging.current = true; startPos.current = { x: e.clientX - pan.x, y: e.clientY - pan.y }; };
   const handleMouseMove  = (e: React.MouseEvent) => { if (!isDragging.current) return; setPan({ x: e.clientX - startPos.current.x, y: e.clientY - startPos.current.y }); };
   const handleMouseUp    = () => { isDragging.current = false; };
@@ -138,12 +203,11 @@ export const HolisticTracker: React.FC = () => {
           locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`,
         });
 
-        // PERFORMANCE: complexity 1 = ~2x faster than 2, still clinically accurate
         holistic.setOptions({
           modelComplexity: 1,
           smoothLandmarks: true,
-          enableSegmentation: false,  // not needed for PT
-          refineFaceLandmarks: false, // face iris tracking disabled — saves 30% CPU
+          enableSegmentation: false,
+          refineFaceLandmarks: false,
           minDetectionConfidence: 0.6,
           minTrackingConfidence: 0.5,
         });
@@ -169,6 +233,12 @@ export const HolisticTracker: React.FC = () => {
           if (!results.image) return;
           if (!streamStarted) setStreamStarted(true);
 
+          const left  = results.leftHandLandmarks  || null;
+          const right = results.rightHandLandmarks || null;
+
+          // Run gesture detection every frame
+          processGesture(left, right);
+
           const smoothed = tracking.smooth(results);
           renderFrame(results);
 
@@ -178,14 +248,13 @@ export const HolisticTracker: React.FC = () => {
             return {
               pose:      smoothed.poseLandmarks  || null,
               face:      results.faceLandmarks   || null,
-              leftHand:  results.leftHandLandmarks  || null,
-              rightHand: results.rightHandLandmarks || null,
+              leftHand:  left,
+              rightHand: right,
               imageSize: sizeChanged ? { width: w, height: h } : prev.imageSize,
             };
           });
         });
 
-        // PERFORMANCE: Only send a new frame when the previous one is done
         const processFrame = () => {
           if (videoRef.current && holistic && !videoRef.current.paused && !isProcessingRef.current) {
             isProcessingRef.current = true;
@@ -244,7 +313,6 @@ export const HolisticTracker: React.FC = () => {
     ctx.drawImage(results.image, sx, sy, sw, sh, 0, 0, w, h);
     ctx.restore();
 
-    // PT logic: analyze pose for events
     if (results.poseLandmarks) {
       const analysis = logic.analyze(results.poseLandmarks);
       if (analysis.event === 'PUNCH_END')  setStats(prev => ({ ...prev, punches: prev.punches + 1 }));
@@ -253,6 +321,17 @@ export const HolisticTracker: React.FC = () => {
         coach.speak('TELEGRAPH');
       }
     }
+  };
+
+  // ─── GESTURE HUD LABEL ───────────────────────────────────────────────────
+  const gestureLabel: Record<string, string> = {
+    ONE: '☝️  1 — SKELETON',
+    TWO: '✌️  2 — NERVOUS',
+    THREE: '🤟  3 — JOINTS',
+    PINCH: '👌  ZOOM IN',
+    THUMBS_DOWN: '👎  ZOOM RESET',
+    FIVE: '🖐️  FIVE',
+    FIST: '✊  FIST',
   };
 
   // ─── SPLASH SCREEN ───────────────────────────────────────────────────────
@@ -265,7 +344,15 @@ export const HolisticTracker: React.FC = () => {
         <div className="relative z-10 flex flex-col items-center gap-12">
           <div className="text-center">
             <h1 className="text-[#10b981] font-mono text-lg tracking-[1em] uppercase mb-2">JKD Form Engineer</h1>
-            <p className="text-[#10b981]/50 font-mono text-xs tracking-widest">PHYSICAL THERAPY EDITION · V4.0</p>
+            <p className="text-[#10b981]/50 font-mono text-xs tracking-widest">PHYSICAL THERAPY EDITION · V5.0</p>
+          </div>
+
+          <div className="font-mono text-[10px] text-[#10b981]/40 tracking-widest text-center leading-7">
+            <div>☝️  HOLD 1 → SKELETON MODE</div>
+            <div>✌️  HOLD 2 → NERVOUS MODE</div>
+            <div>🤟  HOLD 3 → JOINTS MODE</div>
+            <div>👌  HOLD PINCH → ZOOM IN</div>
+            <div>👎  THUMBS DOWN → ZOOM RESET</div>
           </div>
 
           <select
@@ -302,11 +389,23 @@ export const HolisticTracker: React.FC = () => {
     >
       <video ref={videoRef} className="hidden" muted playsInline autoPlay />
 
-      {/* AI PULSE INDICATOR */}
+      {/* AI PULSE */}
       <div className={`ai-pulse ${isAiThinking ? 'thinking' : ''}`} onMouseDown={e => e.stopPropagation()}>
         <div className="pulse-ring" />
         <div className="pulse-core" />
       </div>
+
+      {/* GESTURE HUD — shows detected gesture + hold progress */}
+      {activeGesture && (
+        <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
+          <div className="font-mono text-[11px] tracking-widest text-[#10b981] bg-black/70 border border-[#10b981]/30 px-5 py-2 backdrop-blur-sm">
+            {gestureLabel[activeGesture] ?? activeGesture}
+            {!gestureFired.current && (
+              <span className="text-[#10b981]/40 ml-2">— hold to confirm</span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* STATS HUD */}
       <div className="fixed top-6 right-6 z-50 font-mono text-right pointer-events-none">
@@ -315,6 +414,7 @@ export const HolisticTracker: React.FC = () => {
         {stats.telegraphs > 0 && (
           <div className="text-[#ef4444] text-xs tracking-widest mt-1">⚠ {stats.telegraphs} TELEGRAPH{stats.telegraphs > 1 ? 'S' : ''}</div>
         )}
+        <div className="text-[#10b981]/40 text-[10px] tracking-widest mt-2">{zoom.toFixed(1)}x ZOOM</div>
       </div>
 
       {/* ZOOM SLIDER */}
@@ -343,6 +443,8 @@ export const HolisticTracker: React.FC = () => {
           videoSize={allLandmarks.imageSize}
           cropInfo={cropInfo}
           videoViewport={videoViewport}
+          mode={vizMode}
+          onModeChange={syncMode}
         />
       </div>
     </div>

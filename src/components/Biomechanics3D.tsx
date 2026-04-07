@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useCallback, useState } from 'react';
+import React, { useRef, useMemo, useCallback } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrthographicCamera, Html } from '@react-three/drei';
 import * as THREE from 'three';
@@ -24,6 +24,9 @@ interface Biomechanics3DProps {
   videoSize: { width: number; height: number };
   cropInfo: { sx: number; sy: number; sw: number; sh: number };
   videoViewport: { width: number; height: number; top: number; left: number };
+  // Controlled from parent (HolisticTracker) so gestures can drive mode
+  mode: VisualizationMode;
+  onModeChange: (m: VisualizationMode) => void;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -467,7 +470,7 @@ const ModeSwitcher: React.FC<{ mode: VisualizationMode; onChange: (m: Visualizat
 
 // ─── Root Export ─────────────────────────────────────────────────────────────
 export const Biomechanics3D: React.FC<Biomechanics3DProps> = (props) => {
-  const [mode, setMode] = useState<VisualizationMode>('SKELETON');
+  const { mode, onModeChange } = props;
 
   return (
     <div
@@ -489,7 +492,7 @@ export const Biomechanics3D: React.FC<Biomechanics3DProps> = (props) => {
         <Scene {...props} mode={mode} />
       </Canvas>
 
-      <ModeSwitcher mode={mode} onChange={setMode} />
+      <ModeSwitcher mode={mode} onChange={onModeChange} />
     </div>
   );
 };

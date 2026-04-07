@@ -97,51 +97,60 @@ export class JKDLogic {
    * Recognizes hand gestures for camera control.
    * Returns: Gestures for Zoom and Skeleton Scale.
    */
-  public detectHandGesture(handLandmarks: any[]): 'FIVE' | 'FIST' | 'THUMBS_DOWN' | 'ONE' | 'TWO' | null {
+  public detectHandGesture(handLandmarks: any[]): 'FIVE' | 'FIST' | 'THUMBS_DOWN' | 'ONE' | 'TWO' | 'THREE' | 'PINCH' | null {
     if (!handLandmarks || handLandmarks.length < 21) return null;
 
-    // Helper: Is finger extended?
+    const wrist   = handLandmarks[0];
+    const thumbTip = handLandmarks[4];
+    const indexTip = handLandmarks[8];
+
+    // Helper: distance between two landmarks
+    const dist = (a: any, b: any) =>
+      Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2);
+
+    // Helper: Is finger extended (tip further from wrist than PIP joint)?
     const isExtended = (tipIdx: number, pipIdx: number) => {
-      // In normalized coordinates, Y decreases upwards. 
-      // For a standard vertical hand, TIP.y < PIP.y means extended.
-      // But we can use distance from wrist for more robustness.
-      const wrist = handLandmarks[0];
       const tip = handLandmarks[tipIdx];
       const pip = handLandmarks[pipIdx];
-      
-      const distTip = Math.sqrt(Math.pow(tip.x - wrist.x, 2) + Math.pow(tip.y - wrist.y, 2));
-      const distPip = Math.sqrt(Math.pow(pip.x - wrist.x, 2) + Math.pow(pip.y - wrist.y, 2));
-      return distTip > distPip * 1.2; // 20% further means extended
+      const distTip = dist(tip, wrist);
+      const distPip = dist(pip, wrist);
+      return distTip > distPip * 1.2;
     };
+
+    // PINCH / CIRCLE: Thumb tip very close to index tip (< 12% of hand span)
+    const handSpan = dist(wrist, handLandmarks[12]); // wrist to middle MCP
+    const pinchDist = dist(thumbTip, indexTip);
+    if (pinchDist < handSpan * 0.35) return 'PINCH';
 
     const fingersExtended = [
       isExtended(8, 6),   // Index
       isExtended(12, 10), // Middle
       isExtended(16, 14), // Ring
-      isExtended(20, 18)  // Pinky
+      isExtended(20, 18), // Pinky
     ];
+    const extendedCount = fingersExtended.filter(Boolean).length;
 
-    const extendedCount = fingersExtended.filter(v => v).length;
+    // FIVE: 4 fingers all extended
+    if (extendedCount >= 4) return 'FIVE';
 
-    // 1. FIVE (Open Palm): All/Most extended
-    if (extendedCount >= 3) return 'FIVE';
+    // THREE: Index + Middle + Ring (no pinky)
+    if (fingersExtended[0] && fingersExtended[1] && fingersExtended[2] && extendedCount === 3) return 'THREE';
 
-    // 2. ONE: Only Index
-    if (fingersExtended[0] && extendedCount === 1) return 'ONE';
-
-    // 3. TWO: Index and Middle
+    // TWO: Index + Middle only
     if (fingersExtended[0] && fingersExtended[1] && extendedCount === 2) return 'TWO';
 
-    // 4. THUMBS DOWN: 
-    const thumbTip = handLandmarks[4];
-    const thumbBase = handLandmarks[2];
-    const isThumbDown = thumbTip.y > thumbBase.y + 0.05; 
+    // ONE: Index only
+    if (fingersExtended[0] && extendedCount === 1) return 'ONE';
 
+    // THUMBS DOWN: thumb tip below thumb base, fingers closed
+    const thumbBase = handLandmarks[2];
+    const isThumbDown = thumbTip.y > thumbBase.y + 0.05;
     if (extendedCount <= 1 && isThumbDown) return 'THUMBS_DOWN';
 
-    // 5. FIST: All closed
+    // FIST: all closed
     if (extendedCount === 0) return 'FIST';
 
     return null;
   }
 }
+
