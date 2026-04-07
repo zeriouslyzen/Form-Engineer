@@ -44,11 +44,19 @@ export class VoiceAI {
 
     this.recognition.onerror = (event: any) => {
       console.error("Speech Recognition Error:", event.error);
+      if (event.error === 'not-allowed' || event.error === 'aborted') {
+        this.isListening = false;
+      }
     };
 
     this.recognition.onend = () => {
       if (this.isListening) {
-        this.recognition.start(); // Keep listening
+        // Prevent aggressive thrashing loop if recognition fails instantly
+        setTimeout(() => {
+          if (this.isListening) {
+             try { this.recognition.start(); } catch (e) {}
+          }
+        }, 1000);
       }
     };
   }
