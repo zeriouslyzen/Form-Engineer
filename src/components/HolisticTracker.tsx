@@ -5,6 +5,7 @@ import { VoiceAI } from '../lib/VoiceAI';
 import { Biomechanics3D } from './Biomechanics3D';
 import type { VisualizationMode } from './Biomechanics3D';
 import { tracking } from '../lib/TrackingEngine';
+import { BiometricsEngine } from '../lib/BiometricsEngine';
 
 /**
  * JKD DOJO — PHYSICAL THERAPY EDITION (V5.0)
@@ -64,8 +65,8 @@ export const HolisticTracker: React.FC = () => {
   const [pinchDelta, setPinchDelta] = useState(0); // for HUD indicator (-1..1)
 
   // ── Kinetic Menu state ────────────────────────────────────────────────────
-  const [activeMenu, setActiveMenu] = useState<'ONE' | 'TWO' | null>(null);
-  const activeMenuRef = useRef<'ONE' | 'TWO' | null>(null);
+  const [activeMenu, setActiveMenu] = useState<'ONE' | 'TWO' | 'THREE' | null>(null);
+  const activeMenuRef = useRef<'ONE' | 'TWO' | 'THREE' | null>(null);
   const menuStartX    = useRef<number>(0);
   const menuBaseIdx   = useRef<number>(0);
   const menuIndexRef  = useRef<number>(0);
@@ -80,6 +81,14 @@ export const HolisticTracker: React.FC = () => {
   const leftThumbUpAt   = useRef<number>(0);
   const rightThumbUpAt  = useRef<number>(0);
   const bothFired       = useRef(false);
+
+  // ── Biometrics (rPPG & RPM) ───────────────────────────────────────────────
+  const [biometricsOn, setBiometricsOn] = useState<boolean>(false);
+  const biometricsOnRef = useRef<boolean>(false);
+  const syncBiometrics = (m: boolean) => { biometricsOnRef.current = m; setBiometricsOn(m); };
+  const rppgCanvasRef = useRef<HTMLCanvasElement>(null);
+  const engineRef = useRef(new BiometricsEngine());
+  const [vitals, setVitals] = useState({ bpm: 0, rpm: 0 });
 
   const [allLandmarks, setAllLandmarks] = useState<{
     pose: any[] | null;
@@ -204,29 +213,27 @@ export const HolisticTracker: React.FC = () => {
       }
     }
 
-    // ── KINETIC DIAL MENUS (ONE = Mode, TWO = Background) ─────────────────
-    if (gesture === 'ONE' || gesture === 'TWO') {
+    // ── KINETIC DIAL MENUS (ONE = Mode, TWO = Background, THREE = Vitals) ──
+    if (gesture === 'ONE' || gesture === 'TWO' || gesture === 'THREE') {
       if (hand) {
         const wrist = hand[0];
         if (activeMenuRef.current !== gesture) {
           activeMenuRef.current = gesture;
           setActiveMenu(gesture);
           menuStartX.current = wrist.x;
-          // init index
-          const base = gesture === 'ONE' 
-            ? ['SKELETON', 'NERVOUS', 'JOINTS'].indexOf(vizModeRef.current)
-            : (stealthModeRef.current ? 1 : 0);
+          
+          let base = 0;
+          if (gesture === 'ONE') base = ['SKELETON', 'NERVOUS', 'JOINTS'].indexOf(vizModeRef.current);
+          if (gesture === 'TWO') base = stealthModeRef.current ? 1 : 0;
+          if (gesture === 'THREE') base = biometricsOnRef.current ? 1 : 0;
+          
           menuBaseIdx.current = base >= 0 ? base : 0;
           menuIndexRef.current = menuBaseIdx.current;
           setMenuIndex(menuBaseIdx.current);
-          coach.speak('PUNCH_END'); // small confirm blip on open
+          coach.speak('PUNCH_END');
         } else {
-          // Scrubbing
-          // Positive rawDelta means hand moved from right to left natively (which is physically moving left on unmirrored raw landmarks)
-          // We want moving physical right to scrub right.
-          // By default, wrist.x decreases as the hand translates left on screen. 
           const rawDelta = menuStartX.current - wrist.x; 
-          const stepDelta = Math.round(rawDelta / 0.15); // normalized travel slot
+          const stepDelta = Math.round(rawDelta / 0.15); 
           const maxIdx = gesture === 'ONE' ? 2 : 1;
           const newIdx = Math.max(0, Math.min(maxIdx, menuBaseIdx.current + stepDelta));
           if (menuIndexRef.current !== newIdx) {
@@ -235,17 +242,13 @@ export const HolisticTracker: React.FC = () => {
           }
         }
         setActiveGesture(gesture);
-        gestureRef.current = null; // suppress legacy hold timers
+        gestureRef.current = null;
         return;
       }
     } else if (activeMenuRef.current !== null) {
-      // Finger dropped → apply selection
-      if (activeMenuRef.current === 'ONE') {
-         const modes: VisualizationMode[] = ['SKELETON', 'NERVOUS', 'JOINTS'];
-         syncMode(modes[menuIndexRef.current]);
-      } else if (activeMenuRef.current === 'TWO') {
-         syncStealth(menuIndexRef.current === 1);
-      }
+      if (activeMenuRef.current === 'ONE') syncMode(['SKELETON', 'NERVOUS', 'JOINTS'][menuIndexRef.current] as VisualizationMode);
+      if (activeMenuRef.current === 'TWO') syncStealth(menuIndexRef.current === 1);
+      if (activeMenuRef.current === 'THREE') syncBiometrics(menuIndexRef.current === 1);
       activeMenuRef.current = null;
       setActiveMenu(null);
     }
@@ -428,6 +431,32 @@ export const HolisticTracker: React.FC = () => {
     }
     ctx.restore();
 
+    // ── 2) RAW rPPG Forehead Extraction ──
+    let greenAvg: number | null = null;
+    if (biometricsOnRef.current && results.faceLandmarks && rppgCanvasRef.current && results.image) {
+      // Landmark 10 is the top center of forehead
+      const fh = results.faceLandmarks[10];
+      const cx = fh.x * w;
+      const cy = fh.y * h;
+      
+      // Extract a 10x10 pixel patch if valid
+      if (cx > 10 && cy > 10 && cx < w - 10 && cy < h - 10) {
+        const rctx = rppgCanvasRef.current.getContext('2d', { willReadFrequently: true });
+        if (rctx) {
+          rctx.drawImage(results.image, cx - 5, cy - 5, 10, 10, 0, 0, 10, 10);
+          const px = rctx.getImageData(0, 0, 10, 10).data;
+          let gSum = 0;
+          for (let i = 1; i < px.length; i += 4) gSum += px[i]; // sum the Green channel
+          greenAvg = gSum / (px.length / 4);
+        }
+      }
+    }
+
+    // ── 3) Engine Computation ──
+    const currentVitals = engineRef.current.updateVitals(results.poseLandmarks || null, greenAvg);
+    setVitals(currentVitals);
+
+    // ── 4) Strike Detection ──
     if (results.poseLandmarks) {
       const analysis = logic.analyze(results.poseLandmarks);
       if (analysis.event === 'PUNCH_END')  setStats(prev => ({ ...prev, punches: prev.punches + 1 }));
@@ -465,6 +494,7 @@ export const HolisticTracker: React.FC = () => {
           <div className="font-mono text-[10px] text-[#10b981]/40 tracking-widest text-center leading-7">
             <div>☝️  HOLD 1 + MOVE ←/→ → TRACKING MODE DIAL</div>
             <div>✌️  HOLD 2 + MOVE ←/→ → ENVIRONMENT DIAL</div>
+            <div>🤟  HOLD 3 + MOVE ←/→ → BIOMETRICS DIAL</div>
             <div>👌  OK SIGN + MOVE ←/→ → KINETIC ZOOM</div>
             <div>👍👍  BOTH THUMBS UP → ZOOM LOCK</div>
           </div>
@@ -526,10 +556,14 @@ export const HolisticTracker: React.FC = () => {
         <div className="fixed top-[20%] left-1/2 -translate-x-1/2 z-50 pointer-events-none">
           <div className="bg-[#050505]/95 border border-[#10b981]/40 rounded-xl p-8 shadow-[0_0_60px_rgba(16,185,129,0.15)] backdrop-blur-xl flex flex-col items-center">
             <div className="text-[#10b981]/60 text-xs font-mono tracking-[0.4em] uppercase mb-8">
-              {activeMenu === 'ONE' ? 'Set Tracking Mode' : 'Environment View'}
+              {activeMenu === 'ONE' ? 'Tracking Mode' : activeMenu === 'TWO' ? 'Environment View' : 'Physiological Biometrics'}
             </div>
             <div className="flex gap-4">
-              {(activeMenu === 'ONE' ? ['SKELETON', 'NERVOUS', 'JOINTS'] : ['CAMERA', 'BLACKOUT']).map((opt, idx) => (
+              {(activeMenu === 'ONE' 
+                ? ['SKELETON', 'NERVOUS', 'JOINTS'] 
+                : activeMenu === 'TWO' 
+                  ? ['CAMERA', 'BLACKOUT'] 
+                  : ['VITALS OFF', 'VITALS ON']).map((opt, idx) => (
                 <div key={opt} className={`px-8 py-4 border font-mono tracking-widest whitespace-nowrap transition-all duration-300 ${
                   idx === menuIndex 
                     ? 'border-[#10b981] bg-[#10b981]/10 text-[#10b981] scale-110 shadow-[0_0_30px_rgba(16,185,129,0.3)]' 
@@ -543,6 +577,25 @@ export const HolisticTracker: React.FC = () => {
               <span className="text-xl animate-pulse">←</span> SCRUB LEFT/RIGHT TO SELECT <span className="text-xl animate-pulse">→</span>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* BIOMETRICS DASHBOARD */}
+      {biometricsOn && (
+        <div className="fixed top-6 left-6 z-50 font-mono pointer-events-none backdrop-blur-md bg-black/40 border border-[#10b981]/20 rounded-xl p-4 flex gap-6 shadow-[0_0_30px_rgba(16,185,129,0.1)] transition-all">
+          <div className="flex flex-col items-center">
+            <div className="text-[#ef4444] text-xs tracking-widest opacity-80 animate-pulse pb-1">BPM rPPG</div>
+            <div className="text-[#ef4444] text-3xl font-bold tracking-tight">
+              {vitals.bpm > 0 ? vitals.bpm : '--'}
+            </div>
+          </div>
+          <div className="flex flex-col items-center border-l border-[#10b981]/20 pl-6">
+            <div className="text-[#3b82f6] text-xs tracking-widest opacity-80 pb-1">RPM KINETIC</div>
+            <div className="text-[#3b82f6] text-3xl font-bold tracking-tight">
+              {vitals.rpm > 0 ? vitals.rpm : '--'}
+            </div>
+          </div>
+          <canvas ref={rppgCanvasRef} className="hidden" width={10} height={10} />
         </div>
       )}
 
