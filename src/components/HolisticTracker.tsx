@@ -16,14 +16,15 @@ import { tracking } from '../lib/TrackingEngine';
  *   👎  THUMBS_DOWN → Zoom out (reset)
  */
 
-// How long (ms) a gesture must be held before it fires
+// How long (ms) a gesture must be held before it fires (mode switches only)
 const GESTURE_HOLD_MS = 700;
 
-// Zoom step per THUMBS_UP trigger
-const ZOOM_STEP = 0.5;
-const ZOOM_MAX  = 5.0;
+// Kinetic pinch zoom sensitivity (normalized X units → zoom delta)
+// 0.3 hand travel = ~2x zoom change at this sensitivity
+const PINCH_SENSITIVITY = 7.0;
+const ZOOM_MAX = 5.0;
 
-// Bilateral detection: both hands must show THUMBS_UP within this window (ms)
+// Bilateral detection window (ms)
 const BILATERAL_WINDOW_MS = 600;
 
 export const HolisticTracker: React.FC = () => {
@@ -48,7 +49,7 @@ export const HolisticTracker: React.FC = () => {
   const vizModeRef = useRef<VisualizationMode>('SKELETON');
   const syncMode = (m: VisualizationMode) => { vizModeRef.current = m; setVizMode(m); };
 
-  // ── Gesture debounce state ────────────────────────────────────────────────
+  // ── Gesture debounce (mode switches only) ───────────────────────────────
   const gestureRef      = useRef<string | null>(null);
   const gestureStart    = useRef<number>(0);
   const gestureFired    = useRef(false);
@@ -56,7 +57,13 @@ export const HolisticTracker: React.FC = () => {
   const [zoomLocked, setZoomLocked]       = useState(false);
   const zoomLockedRef   = useRef(false);
 
-  // Bilateral (both-thumbs-up) detection
+  // ── Kinetic pinch-zoom state ──────────────────────────────────────────────
+  const isPinching      = useRef(false);
+  const pinchRefX       = useRef(0);      // wrist.x when pinch started
+  const pinchBaseZoom   = useRef(1.0);    // zoom level when pinch started
+  const [pinchDelta, setPinchDelta] = useState(0); // for HUD indicator (-1..1)
+
+  // ── Bilateral zoom lock ───────────────────────────────────────────────────
   const leftThumbUpAt   = useRef<number>(0);
   const rightThumbUpAt  = useRef<number>(0);
   const bothFired       = useRef(false);
@@ -127,65 +134,78 @@ export const HolisticTracker: React.FC = () => {
   const handleZoomChange = useCallback((v: number) => { setZoom(v); applyHardwareZoom(v); }, [applyHardwareZoom]);
 
   // ─── GESTURE PROCESSING ──────────────────────────────────────────────────
-  // Both hands are evaluated: left for bilateral, dominant (right fall back left) for single
   const processGesture = useCallback((leftHand: any[] | null, rightHand: any[] | null) => {
     const now = Date.now();
-
     const leftGesture  = leftHand  ? logic.detectHandGesture(leftHand)  : null;
     const rightGesture = rightHand ? logic.detectHandGesture(rightHand) : null;
 
     // ── BILATERAL: both thumbs up → zoom lock toggle ──────────────────────
     if (leftGesture  === 'THUMBS_UP') leftThumbUpAt.current  = now;
     if (rightGesture === 'THUMBS_UP') rightThumbUpAt.current = now;
-
     const bothUp = (now - leftThumbUpAt.current  < BILATERAL_WINDOW_MS) &&
                    (now - rightThumbUpAt.current < BILATERAL_WINDOW_MS);
-
     if (bothUp && !bothFired.current) {
       bothFired.current = true;
       const next = !zoomLockedRef.current;
       zoomLockedRef.current = next;
       setZoomLocked(next);
-      coach.speak('PUNCH_END'); // audio feedback
+      coach.speak('PUNCH_END');
       setActiveGesture('BOTH_THUMBS_UP');
+      isPinching.current = false; // cancel any active pinch
       return;
     }
     if (!bothUp) bothFired.current = false;
 
-    // ── SINGLE HAND: use right, fall back to left ─────────────────────────
+    // Use dominant hand (right preferred, fall back to left)
     const gesture = rightGesture || leftGesture;
-    setActiveGesture(gesture);
+    const hand    = rightHand   || leftHand;
 
+    // ── KINETIC PINCH ZOOM (continuous, no hold timer) ──────────────────
+    if (!zoomLockedRef.current) {
+      if (gesture === 'OK_SIGN' && hand) {
+        const wrist = hand[0]; // wrist landmark (most stable depth anchor)
+        if (!isPinching.current) {
+          // First frame of pinch — record reference X and base zoom
+          isPinching.current  = true;
+          pinchRefX.current   = wrist.x;
+          pinchBaseZoom.current = zoomRef.current;
+          setPinchDelta(0);
+        } else {
+          // Subsequent frames: deltaX drives zoom
+          // With mirroring, moving hand to user's right decreases screen X.
+          // rawDelta positive = hand moved to user's right -> zoom in
+          const rawDelta = pinchRefX.current - wrist.x; 
+          const newZoom  = Math.max(1.0, Math.min(ZOOM_MAX, pinchBaseZoom.current + rawDelta * PINCH_SENSITIVITY));
+          handleZoomChange(newZoom);
+          setPinchDelta(rawDelta / 0.25); // normalize to -1..1 for HUD (0.25 = full travel)
+        }
+        setActiveGesture('PINCH_ZOOM');
+        // Handle mode hold timer reset during pinch
+        gestureRef.current = null;
+        return;
+      } else if (isPinching.current) {
+        // Pinch released — commit current zoom, reset ref for next pinch
+        isPinching.current = false;
+        pinchBaseZoom.current = zoomRef.current;
+        setPinchDelta(0);
+      }
+    }
+
+    // ── MODE SWITCHES (hold timer gestures) ────────────────────────────
+    setActiveGesture(gesture);
     if (gesture !== gestureRef.current) {
-      gestureRef.current = gesture;
+      gestureRef.current   = gesture;
       gestureStart.current = now;
       gestureFired.current = false;
       return;
     }
-
     if (!gesture || gestureFired.current) return;
-    const held = now - gestureStart.current;
-    if (held < GESTURE_HOLD_MS) return;
-
+    if (now - gestureStart.current < GESTURE_HOLD_MS) return;
     gestureFired.current = true;
 
-    // Mode switches
     if (gesture === 'ONE')   syncMode('SKELETON');
     if (gesture === 'TWO')   syncMode('NERVOUS');
     if (gesture === 'THREE') syncMode('JOINTS');
-
-    // Zoom (only if not locked)
-    if (!zoomLockedRef.current) {
-      if (gesture === 'THUMBS_UP') {
-        const next = Math.min(ZOOM_MAX, zoomRef.current + ZOOM_STEP);
-        handleZoomChange(next);
-      }
-      if (gesture === 'THUMBS_DOWN') {
-        const next = Math.max(1.0, zoomRef.current - ZOOM_STEP);
-        handleZoomChange(next);
-        if (next <= 1.0) setPan({ x: 0, y: 0 }); // reset pan when back to 1x
-      }
-    }
   }, [logic, coach, handleZoomChange]);
 
   // ─── MOUSE / DRAG ────────────────────────────────────────────────────────
@@ -359,12 +379,10 @@ export const HolisticTracker: React.FC = () => {
     ONE:           '☝️  1 — SKELETON',
     TWO:           '✌️  2 — NERVOUS',
     THREE:         '🤟  3 — JOINTS',
-    THUMBS_UP:     '👍  ZOOM IN',
-    THUMBS_DOWN:   '👎  ZOOM OUT',
+    PINCH_ZOOM:    '👌  KINETIC ZOOM — MOVE HAND ↔️',
     BOTH_THUMBS_UP:'👍👍  ZOOM LOCK',
     FIVE:          '🖐️  FIVE',
     FIST:          '✊  FIST',
-    PINCH:         '👌  PINCH',
   };
 
   // ─── SPLASH SCREEN ───────────────────────────────────────────────────────
@@ -384,8 +402,7 @@ export const HolisticTracker: React.FC = () => {
             <div>☝️  HOLD 1 → SKELETON MODE</div>
             <div>✌️  HOLD 2 → NERVOUS MODE</div>
             <div>🤟  HOLD 3 → JOINTS MODE</div>
-            <div>👍  HOLD THUMBS UP → ZOOM IN</div>
-            <div>👎  HOLD THUMBS DOWN → ZOOM OUT</div>
+            <div>👌  OK SIGN + MOVE ←/→ → KINETIC ZOOM</div>
             <div>👍👍  BOTH THUMBS UP → ZOOM LOCK</div>
           </div>
 

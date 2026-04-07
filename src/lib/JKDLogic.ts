@@ -97,7 +97,7 @@ export class JKDLogic {
    * Recognizes hand gestures for camera control.
    * Returns: Gestures for Zoom and Skeleton Scale.
    */
-  public detectHandGesture(handLandmarks: any[]): 'FIVE' | 'FIST' | 'THUMBS_DOWN' | 'THUMBS_UP' | 'ONE' | 'TWO' | 'THREE' | 'PINCH' | null {
+  public detectHandGesture(handLandmarks: any[]): 'FIVE' | 'FIST' | 'THUMBS_DOWN' | 'THUMBS_UP' | 'ONE' | 'TWO' | 'THREE' | 'OK_SIGN' | null {
     if (!handLandmarks || handLandmarks.length < 21) return null;
 
     const wrist   = handLandmarks[0];
@@ -117,17 +117,22 @@ export class JKDLogic {
       return distTip > distPip * 1.2;
     };
 
-    // PINCH / CIRCLE: Thumb tip very close to index tip (< 12% of hand span)
-    const handSpan = dist(wrist, handLandmarks[12]); // wrist to middle MCP
-    const pinchDist = dist(thumbTip, indexTip);
-    if (pinchDist < handSpan * 0.35) return 'PINCH';
-
     const fingersExtended = [
       isExtended(8, 6),   // Index
       isExtended(12, 10), // Middle
       isExtended(16, 14), // Ring
       isExtended(20, 18), // Pinky
     ];
+
+    // OK SIGN: Thumb tip very close to index tip (< 35% of hand span) AND other 3 fingers extended
+    const handSpan = dist(wrist, handLandmarks[12]); // wrist to middle MCP
+    const pinchDist = dist(thumbTip, indexTip);
+    const isPinching = pinchDist < handSpan * 0.35;
+    
+    if (isPinching && fingersExtended[1] && fingersExtended[2] && fingersExtended[3]) {
+      return 'OK_SIGN';
+    }
+
     const extendedCount = fingersExtended.filter(Boolean).length;
 
     // FIVE: 4 fingers all extended
